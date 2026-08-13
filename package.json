@@ -1,19 +1,23 @@
 {
-  "name": "atomicagent",
-  "version": "0.1.0",
-  "private": true,
-  "description": "AI sourcing agent for MSMEs. Three x402-gated checks, one Algorand atomic settlement.",
-  "type": "module",
-  "engines": {
-    "node": ">=20.11.0"
-  },
-  "scripts": {
-    "typecheck": "pnpm -r --parallel typecheck",
-    "build": "pnpm -r build"
-  },
-  "devDependencies": {
-    "@types/node": "^22.10.2",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "name": "atomicagent",
+    "version": "0.1.0",
+    "private": true,
+    "description": "AI sourcing agent for MSMEs. Three x402-gated checks, one Algorand atomic settlement.",
+    "type": "module",
+    "engines": {
+      "node": ">=20.11.0"
+    },
+    "scripts": {
+      "dev": "concurrently --names \"PRICE,AVAIL,VERIFY\" --prefix-colors \"cyan,magenta,yellow\" --kill-others \"pnpm --filter @atomicagent/service-price dev\" \"pnpm --filter @atomicagent/service-availability dev\" \"pnpm --filter @atomicagent/service-verification dev\"",
+      "typecheck": "pnpm -r --parallel typecheck",
+      "build": "pnpm -r build",
+      "verify": "node scripts/verify-structure.mjs",
+      "health": "node scripts/health-check.mjs"
+    },
+    "devDependencies": {
+      "@types/node": "^22.10.2",
+      "concurrently": "^9.1.2",
+      "tsx": "^4.19.2",
+      "typescript": "^5.7.2"
+    }
   }
-}

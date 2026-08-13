@@ -16,47 +16,74 @@ const ROOT = process.cwd();
 // Add entries here as we create new files, so this stays the source of truth.
 // ---------------------------------------------------------------------------
 const EXPECTED = {
-  'Root config': [
-    'package.json',
-    'pnpm-workspace.yaml',
-    'tsconfig.base.json',
-    '.gitignore',
-    '.gitattributes',
-    '.env.example',
-    '.env',
-  ],
-  'packages/shared': [
-    'packages/shared/package.json',
-    'packages/shared/tsconfig.json',
-    'packages/shared/src/index.ts',
-    'packages/shared/src/constants/network.ts',
-    'packages/shared/src/constants/pricing.ts',
-    'packages/shared/src/types/errors.ts',
-    'packages/shared/src/types/x402.ts',
-    'packages/shared/src/types/sourcing.ts',
-    'packages/shared/src/schemas/sourcing.schema.ts',
-    'packages/shared/src/schemas/x402.schema.ts',
-  ],
-  'apps/service-price': [
-    'apps/service-price/package.json',
-    'apps/service-price/tsconfig.json',
-    'apps/service-price/src/config/env.ts',
-    'apps/service-price/src/config/logger.ts',
-    'apps/service-price/src/config/x402.ts',
-    'apps/service-price/src/domain/priceEngine.ts',
-  ],
-};
+    'Root config': [
+      'package.json',
+      'pnpm-workspace.yaml',
+      'tsconfig.base.json',
+      '.gitignore',
+      '.gitattributes',
+      '.env.example',
+      '.env',
+    ],
+    'packages/shared': [
+      'packages/shared/package.json',
+      'packages/shared/tsconfig.json',
+      'packages/shared/src/index.ts',
+      'packages/shared/src/constants/network.ts',
+      'packages/shared/src/constants/pricing.ts',
+      'packages/shared/src/types/errors.ts',
+      'packages/shared/src/types/x402.ts',
+      'packages/shared/src/types/sourcing.ts',
+      'packages/shared/src/schemas/sourcing.schema.ts',
+      'packages/shared/src/schemas/x402.schema.ts',
+    ],
+    'apps/service-price': [
+      'apps/service-price/package.json',
+      'apps/service-price/tsconfig.json',
+      'apps/service-price/src/index.ts',
+      'apps/service-price/src/config/env.ts',
+      'apps/service-price/src/config/logger.ts',
+      'apps/service-price/src/config/x402.ts',
+      'apps/service-price/src/domain/priceEngine.ts',
+      'apps/service-price/src/middleware/errorHandler.ts',
+      'apps/service-price/src/middleware/rateLimit.ts',
+      'apps/service-price/src/middleware/x402Verify.ts',
+      'apps/service-price/src/routes/check.ts',
+    ],
+    'apps/service-availability': [
+      'apps/service-availability/package.json',
+      'apps/service-availability/tsconfig.json',
+      'apps/service-availability/src/index.ts',
+      'apps/service-availability/src/config/env.ts',
+      'apps/service-availability/src/config/logger.ts',
+      'apps/service-availability/src/config/x402.ts',
+      'apps/service-availability/src/domain/stockLedger.ts',
+      'apps/service-availability/src/middleware/errorHandler.ts',
+      'apps/service-availability/src/middleware/rateLimit.ts',
+      'apps/service-availability/src/middleware/x402Verify.ts',
+      'apps/service-availability/src/routes/check.ts',
+    ],
+    'apps/service-verification': [
+      'apps/service-verification/package.json',
+      'apps/service-verification/tsconfig.json',
+      'apps/service-verification/src/index.ts',
+      'apps/service-verification/src/config/env.ts',
+      'apps/service-verification/src/config/logger.ts',
+      'apps/service-verification/src/config/x402.ts',
+      'apps/service-verification/src/domain/sellerRegistry.ts',
+      'apps/service-verification/src/middleware/errorHandler.ts',
+      'apps/service-verification/src/middleware/rateLimit.ts',
+      'apps/service-verification/src/middleware/x402Verify.ts',
+      'apps/service-verification/src/routes/check.ts',
+    ],
+  };
 
 // Folders that must exist but may still be empty at this stage.
 const EXPECTED_DIRS = [
-  'apps/service-price/src/middleware',
-  'apps/service-price/src/routes',
-  'apps/service-availability',
-  'apps/service-verification',
-  'apps/orchestrator',
-  'apps/web',
-  'scripts',
-];
+    'apps/orchestrator',
+    'apps/web',
+    'scripts',
+  ];
 
 // Files that must never be committed.
 const MUST_BE_GITIGNORED = ['.env'];
