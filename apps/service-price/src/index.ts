@@ -1,0 +1,125 @@
+/**
+ * Price microservice entry point.
+ *
+ * Middleware order matters and is deliberate:
+ *   1. helmet        security headers before anything else runs
+ *   2. cors          reject disallowed origins early
+ *   3. json parser   with a size cap
+ *   4. rate limit    before any real work happens
+ *   5. routes
+ *   6. 404 handler
+ *   7. error handler LAST, or Express will not use it
+ */
+
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import { env } from './config/env.js';
+import { logger } from './config/logger.js';
+import { checkRouter } from './routes/check.js';
+import { globalLimiter } from './middleware/rateLimit.js';
+import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
+
+const app = express();
+
+// Railway and Render sit behind a proxy. Without this, express-rate-limit sees
+// every request as coming from the proxy IP and rate-limits all users as one.
+app.set('trust proxy', 1);
+
+app.use(helmet());
+
+app.use(
+  cors({
+    origin: env.corsOrigins,
+    methods: ['GET', 'POST'],
+    // X-PAYMENT is a custom header, so it must be explicitly allowed or the
+    // browser preflight will strip it and every paid request will 402 forever.
+    allowedHeaders: ['Content-Type', 'X-PAYMENT'],
+    exposedHeaders: ['X-PAYMENT-RESPONSE'],
+    maxAge: 600,
+  }),
+);
+
+// 64kb is generous for our bodies and small enough to make payload flooding
+// pointless.
+app.use(express.json({ limit: '64kb' }));
+/**
+ * Body-parser error trap.
+ *
+ * express.json() throws a SyntaxError on malformed JSON. Left alone, that
+ * reaches the generic handler and surfaces as a 500 — which wrongly implies
+ * our service is broken when the client simply sent bad data. A client error
+ * deserves a 4xx.
+ *
+ * Must sit directly after express.json() so it catches only parse failures.
+ */
+app.use((err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err instanceof SyntaxError && 'body' in err) {
+      logger.warn({ err: err.message }, 'malformed JSON body');
+      res.status(400).json({
+        ok: false,
+        code: 'VALIDATION_FAILED',
+        message: 'Request body is not valid JSON',
+      });
+      return;
+    }
+    next(err);
+  });
+  
+app.use(globalLimiter);
+
+/** Liveness probe. Deployment platforms poll this; keep it cheap and unguarded. */
+app.get('/health', (_req, res) => {
+  res.status(200).json({
+    ok: true,
+    data: {
+      service: 'service-price',
+      status: 'healthy',
+      network: env.network,
+      payTo: env.payTo,
+      asset: env.asset,
+      feeAtomic: env.feeAtomic,
+      paymentIndex: 1,
+    },
+  });
+});
+
+app.use('/check', checkRouter);
+
+app.use(notFoundHandler);
+app.use(errorHandler);
+
+const server = app.listen(env.port, () => {
+  logger.info(
+    {
+      port: env.port,
+      payTo: env.payTo,
+      asset: env.asset.id,
+      fee: env.feeAtomic,
+      facilitator: env.facilitatorUrl,
+    },
+    `price service listening on http://localhost:${env.port}`,
+  );
+});
+
+/**
+ * Graceful shutdown.
+ *
+ * Without this, a redeploy kills in-flight requests mid-verification and the
+ * client sees a connection reset rather than a clean error.
+ */
+function shutdown(signal: string): void {
+  logger.info({ signal }, 'shutting down');
+  server.close(() => {
+    logger.info('closed cleanly');
+    process.exit(0);
+  });
+  // If connections refuse to drain, do not hang forever.
+  setTimeout(() => {
+    logger.warn('forced shutdown after timeout');
+    process.exit(1);
+  }, 10_000).unref();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
