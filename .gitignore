@@ -1,0 +1,33 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# builds
+dist/
+build/
+.vite/
+*.tsbuildinfo
+
+# environment — NEVER COMMIT
+.env
+.env.local
+.env.*.local
+testnet-accounts.env
+*.mnemonic
+*.key
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# editor / os
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
+
+# deployment
+.vercel
+.railway

@@ -1,0 +1,19 @@
+# Normalise line endings across Windows / macOS / Linux.
+# Prevents phantom diffs where a whole file looks changed but nothing did.
+
+* text=auto eol=lf
+
+# Windows-only files keep CRLF
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+*.ps1  text eol=crlf
+
+# Binary files: never touch
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.woff binary
+*.woff2 binary
+*.pdf  binary
