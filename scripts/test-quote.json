@@ -1,0 +1,10 @@
+{
+    "request": {
+      "sku": "SKU-4471",
+      "quantity": 500,
+      "maxUnitPriceAtomic": "5000000",
+      "requiredBy": "2026-09-15",
+      "supplierId": "SUP-BLR-011"
+    },
+    "buyerAddress": "SH3B4MU5GH5XUQ7PFSYE7NRXUZG6JRNQVCQBHFFOV6Y3F7IAP5GOXH2B2I"
+  }
