@@ -1,0 +1,124 @@
+/**
+ * AtomicAgent design tokens.
+ *
+ * The palette is drawn from engineering blueprints and industrial verification,
+ * not generic crypto dark-mode. Cold blue-greys throughout, with exactly one
+ * warm colour — brass — reserved for the moment value moves. That restraint is
+ * the point: the screen warms up once, and only once.
+ */
+
+ @tailwind base;
+ @tailwind components;
+ @tailwind utilities;
+ 
+ :root {
+   /* ---- surfaces ---- */
+   --void: #070b10;        /* canvas. blueprint paper at night */
+   --blueprint: #0d1926;   /* panel base */
+   --panel: #111f30;       /* raised panel */
+   --hairline: #1c3047;    /* 1px rules and borders */
+ 
+   /* ---- text ---- */
+   --chalk: #e8edf2;       /* headings. draughtsman's chalk */
+   --graphite: #8896a6;    /* body. pencil on blueprint */
+   --graphite-dim: #566573;/* captions, disabled */
+ 
+   /* ---- state ---- */
+   --verify: #35d6a4;      /* pass. GST-portal green, not neon */
+   --verify-dim: #1a6b52;
+   --brass: #e8b84b;       /* SETTLEMENT ONLY. the one warm colour */
+   --brass-dim: #7a6228;
+   --halt: #ff5c4d;        /* abort. industrial stop, not error-red */
+   --halt-dim: #7a2c25;
+   --pending: #4a7fb5;     /* in flight */
+ 
+   /* ---- motion ---- */
+   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+   --ease-in-out-quart: cubic-bezier(0.76, 0, 0.24, 1);
+   --dur-fast: 180ms;
+   --dur-base: 320ms;
+   --dur-slow: 640ms;
+   --dur-binding: 2400ms;  /* the signature animation */
+ }
+ 
+ * {
+   box-sizing: border-box;
+ }
+ 
+ html,
+ body {
+   margin: 0;
+   padding: 0;
+   background: var(--void);
+   color: var(--graphite);
+   font-family: 'Inter Tight', system-ui, sans-serif;
+   -webkit-font-smoothing: antialiased;
+   -moz-osx-font-smoothing: grayscale;
+ }
+ 
+ #root {
+   min-height: 100vh;
+ }
+ 
+ /**
+  * Tabular figures for every number.
+  *
+  * Without this, amounts jitter horizontally as they count up, because the
+  * glyphs have different widths. In a payments interface that reads as broken.
+  */
+ .tabular {
+   font-variant-numeric: tabular-nums;
+   font-feature-settings: 'tnum';
+ }
+ 
+ /* Blueprint grid, very faint. Suggests drafting paper without being noisy. */
+ .grid-bg {
+   background-image:
+     linear-gradient(rgba(28, 48, 71, 0.35) 1px, transparent 1px),
+     linear-gradient(90deg, rgba(28, 48, 71, 0.35) 1px, transparent 1px);
+   background-size: 48px 48px;
+ }
+ 
+ /* Hairline rules that match the blueprint aesthetic. */
+ .hairline {
+   border-color: var(--hairline);
+ }
+ 
+ /**
+  * Reduced motion.
+  *
+  * Everything still changes state, it just does so instantly. A judge with
+  * motion sensitivity gets the full information, minus the animation.
+  */
+ @media (prefers-reduced-motion: reduce) {
+   *,
+   *::before,
+   *::after {
+     animation-duration: 0.01ms !important;
+     animation-iteration-count: 1 !important;
+     transition-duration: 0.01ms !important;
+     scroll-behavior: auto !important;
+   }
+ }
+ 
+ /* Scrollbar, styled to match rather than default grey. */
+ ::-webkit-scrollbar {
+   width: 10px;
+   height: 10px;
+ }
+ ::-webkit-scrollbar-track {
+   background: var(--void);
+ }
+ ::-webkit-scrollbar-thumb {
+   background: var(--hairline);
+   border-radius: 5px;
+ }
+ ::-webkit-scrollbar-thumb:hover {
+   background: var(--graphite-dim);
+ }
+ 
+ /* Focus ring. Visible, on-brand, keyboard-only. */
+ :focus-visible {
+   outline: 2px solid var(--verify);
+   outline-offset: 2px;
+ }

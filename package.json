@@ -8,7 +8,7 @@
     "node": ">=20.11.0"
   },
   "scripts": {
-    "dev": "concurrently --names \"PRICE,AVAIL,VERIFY,ORCH\" --prefix-colors \"cyan,magenta,yellow,green\" --kill-others \"pnpm --filter @atomicagent/service-price dev\" \"pnpm --filter @atomicagent/service-availability dev\" \"pnpm --filter @atomicagent/service-verification dev\" \"pnpm --filter @atomicagent/orchestrator dev\"",
+    "dev": "concurrently --names \"PRICE,AVAIL,VERIFY,ORCH,WEB\" --prefix-colors \"cyan,magenta,yellow,green,blue\" --kill-others \"pnpm --filter @atomicagent/service-price dev\" \"pnpm --filter @atomicagent/service-availability dev\" \"pnpm --filter @atomicagent/service-verification dev\" \"pnpm --filter @atomicagent/orchestrator dev\" \"pnpm --filter @atomicagent/web dev\"",
     "typecheck": "pnpm -r --parallel typecheck",
     "build": "pnpm -r build",
     "verify": "node scripts/verify-structure.mjs",
