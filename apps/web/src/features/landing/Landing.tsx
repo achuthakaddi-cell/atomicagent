@@ -16,7 +16,7 @@ import { Mechanism } from './Mechanism.js';
 import { Differentiator } from './Differentiator.js';
 import { Proof } from './Proof.js';
 import { TheBinding } from '../binding/TheBinding.js';
-import { usePageMotion, useInView } from './useScrollProgress.js';
+import { usePageMotion, useInViewRepeat } from './useScrollProgress.js';
 import type { RunPhase } from '../../store/useRunStore.js';
 
 /** Header link styling. */
@@ -57,34 +57,49 @@ function TopBar({ progress }: { progress: number }) {
  * Reuses the same component the application runs, cycling through its phases
  * so a reader who never launches the app still sees the mechanism.
  *
- * The phase cycle lives in an effect rather than being scheduled during render,
- * which would fire on every re-render and leak timers.
+ * REPLAYS ON EVERY VISIT
+ * ----------------------
+ * The cycle restarts whenever the section re-enters the viewport, and a button
+ * replays it on demand. A one-shot animation is useless in a demo: the presenter
+ * cannot show it twice without reloading the page.
  *
  * @returns the binding section
  */
 function BindingShowcase() {
-  const { ref, inView } = useInView<HTMLElement>(0.4);
+  const { ref, inView } = useInViewRepeat<HTMLElement>(0.35);
   const [phase, setPhase] = useState<RunPhase>('idle');
+  const [runId, setRunId] = useState(0);
+
+  // Restart the cycle whenever the section comes back into view.
+  useEffect(() => {
+    if (inView) setRunId((n) => n + 1);
+  }, [inView]);
 
   useEffect(() => {
     if (!inView) return;
 
-    const toVerify = setTimeout(() => setPhase('verifying'), 500);
-    const toSettle = setTimeout(() => setPhase('settling'), 2600);
+    setPhase('idle');
+
+    const toVerify = setTimeout(() => setPhase('verifying'), 600);
+    const toSettle = setTimeout(() => setPhase('settling'), 2800);
 
     return () => {
       clearTimeout(toVerify);
       clearTimeout(toSettle);
     };
-  }, [inView]);
+  }, [inView, runId]);
 
   return (
-    <section ref={ref} id="how" className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6">
+    <section
+      ref={ref}
+      id="how"
+      className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6"
+    >
       <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.28em] text-graphite">
         The binding
       </p>
 
-      <h2 className="mb-10 max-w-3xl text-center font-display text-3xl font-extrabold uppercase leading-[0.95] tracking-tightest text-chalk lg:text-5xl">
+      <h2 className="mb-8 max-w-3xl text-center font-display text-3xl font-extrabold uppercase leading-[0.95] tracking-tightest text-chalk lg:text-5xl">
         Chaos becomes one bound structure
       </h2>
 
@@ -92,7 +107,15 @@ function BindingShowcase() {
         <TheBinding phase={phase} groupId={null} verdicts={[]} failedChecks={[]} />
       </div>
 
-      <p className="mt-8 max-w-lg text-center text-[13px] leading-relaxed text-graphite">
+      <button
+        type="button"
+        onClick={() => setRunId((n) => n + 1)}
+        className="mt-6 rounded border hairline px-5 py-2 font-mono text-[10px] uppercase tracking-[0.18em] text-graphite transition-colors duration-200 hover:border-brass hover:text-brass"
+      >
+        Replay
+      </button>
+
+      <p className="mt-6 max-w-lg text-center text-[13px] leading-relaxed text-graphite">
         Before settlement the transactions are independent. After it they share
         one 32-byte group identifier and cannot be separated. If any check fails,
         the group is never submitted and nothing exists on chain to reverse.

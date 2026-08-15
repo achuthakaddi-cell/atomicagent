@@ -112,3 +112,20 @@ export {
     ExactAvmPayloadInput,
     PaymentPayloadInput,
   } from './schemas/x402.schema.js';
+  // ---------------------------------------------------------------------------
+// adaptive spend
+// ---------------------------------------------------------------------------
+export {
+  TIERS,
+  TIER_SPECS,
+  DEFAULT_POLICY,
+  decideEscalation,
+} from './types/tiers.js';
+export type {
+  Tier,
+  TierSpec,
+  Confidence,
+  TierResult,
+  SpendPolicy,
+  SpendDecision,
+} from './types/tiers.js';

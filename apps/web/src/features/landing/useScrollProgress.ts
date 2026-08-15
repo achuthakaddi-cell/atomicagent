@@ -235,3 +235,42 @@ export function usePageMotion(): { progress: number; velocity: number } {
 
   return state;
 }
+/**
+ * Whether an element is currently in view, updating continuously.
+ *
+ * Unlike useInView, this does NOT disconnect after the first intersection. It
+ * reports entry and exit, so a section can replay its animation every time the
+ * reader scrolls back to it.
+ *
+ * @param threshold - fraction of the element that must be visible
+ * @returns a ref to attach, and whether it is currently visible
+ */
+export function useInViewRepeat<T extends HTMLElement>(threshold = 0.3): {
+  ref: React.RefObject<T | null>;
+  inView: boolean;
+} {
+  const ref = useRef<T | null>(null);
+  const [inView, setInView] = useState(false);
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          setInView(entry.isIntersecting);
+        }
+      },
+      { threshold },
+    );
+
+    observer.observe(element);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [threshold]);
+
+  return { ref, inView };
+}

@@ -1,9 +1,9 @@
 /**
- * Verify-only x402 gate.
+ * Verify-only x402 gate, tier-aware.
  *
- * Identical in structure to the price service, with ONE critical difference:
- * OUR_PAYMENT_INDEX is 2, not 1. This service is paid from slot 2 of the shared
- * atomic group and will reject a payment pointed at any other slot.
+ * Identical in structure to the other two services, with ONE critical
+ * difference: OUR_PAYMENT_INDEX is 2. This service is paid from slot 2 of the
+ * shared atomic group and rejects a payment pointed at any other slot.
  *
  * WHY THIS IS NOT THE STOCK MIDDLEWARE
  * ------------------------------------
@@ -12,6 +12,12 @@
  * three services to confirm a payment is VALID without any money moving, so
  * this middleware calls verify() and stops. Settlement happens once, later,
  * from the orchestrator, for the entire group.
+ *
+ * TIER RESOLUTION
+ * ---------------
+ * Which tier a client gets is determined by the amount they paid, never by a
+ * label they supplied. Paying the shallow fee and asking for a deep answer is
+ * exactly the abuse this prevents.
  */
 
 import type { RequestHandler, Request } from 'express';
@@ -23,10 +29,14 @@ import {
   exactAvmPayloadSchema,
   type ExactAvmPayloadV2,
   type PaymentPayload,
+  type Tier,
   type VerifyResponse,
 } from '@atomicagent/shared';
 import { logger } from '../config/logger.js';
-import { facilitatorClient, buildPaymentRequirements } from '../config/x402.js';
+import { facilitatorClient } from '../config/x402.js';
+import { buildAllTierRequirements } from '../config/x402.js';
+import { buildTierRequirements } from '../config/x402.js';
+import { tierForAmount } from '../config/x402.js';
 
 /** The slot in the atomic group this service is paid from. Constant: 2. */
 const OUR_PAYMENT_INDEX = PAYMENT_INDEX_BY_CHECK.availability;
@@ -38,6 +48,12 @@ export interface X402Context {
   verifyResponse: VerifyResponse;
   /** Address that signed the payment, when the facilitator reports it. */
   payer: string | undefined;
+  /**
+   * Which tier the client actually paid for.
+   *
+   * Derived from the amount, not from any label the client supplied.
+   */
+  tier: Tier;
 }
 
 /** Express Request with our verified payment context attached. */
@@ -76,18 +92,22 @@ function decodePaymentHeader(header: string): unknown {
 /**
  * Builds the 402 response body.
  *
+ * Advertises all three tiers. The `accepts` array is a list by design in x402;
+ * a client picks whichever entry it is willing to pay for.
+ *
  * @returns the JSON body for a 402 response
  */
 function build402Body() {
   return {
     x402Version: 2,
     error: 'Payment required',
-    accepts: [buildPaymentRequirements()],
+    accepts: buildAllTierRequirements(),
     // Not part of the x402 spec. Our own hint, so the orchestrator can build
     // the group without hardcoding slot numbers in three separate places.
     atomicAgent: {
       paymentIndex: OUR_PAYMENT_INDEX,
       checkId: 'availability' as const,
+      tiered: true,
     },
   };
 }
@@ -153,9 +173,23 @@ export function x402VerifyOnly(): RequestHandler {
         );
       }
 
-      // ---- 4. Network and asset must match what we accept ----
-      const requirements = buildPaymentRequirements();
+      // ---- 4. Which tier did they pay for? ----
+      //
+      // Determined by the amount, never by a label. A client paying the
+      // shallow fee gets a shallow answer whatever it claims to want.
+      const tier = tierForAmount(payload.accepted.amount);
 
+      if (tier === null) {
+        throw new AppError(
+          ERROR_CODE.PAYMENT_INVALID,
+          'Payment amount does not match any offered tier',
+          { detail: 'offered ' + payload.accepted.amount },
+        );
+      }
+
+      const requirements = buildTierRequirements(tier);
+
+      // ---- 5. Network, asset and payee must match ----
       if (payload.accepted.network !== requirements.network) {
         throw new AppError(
           ERROR_CODE.PAYMENT_INVALID,
@@ -184,21 +218,12 @@ export function x402VerifyOnly(): RequestHandler {
         );
       }
 
-      if (BigInt(payload.accepted.amount) < BigInt(requirements.amount)) {
-        throw new AppError(
-          ERROR_CODE.PAYMENT_INVALID,
-          'Payment amount is below this service fee',
-          {
-            detail: `required ${requirements.amount}, offered ${payload.accepted.amount}`,
-          },
-        );
-      }
-
-      // ---- 5. Ask the facilitator to verify. Still no money moves. ----
+      // ---- 6. Ask the facilitator to verify. Still no money moves. ----
       logger.info(
         {
           groupSize: avmPayload.paymentGroup.length,
           paymentIndex: avmPayload.paymentIndex,
+          tier,
         },
         'verifying payment with facilitator',
       );
@@ -233,14 +258,18 @@ export function x402VerifyOnly(): RequestHandler {
         });
       }
 
-      logger.info({ payer: verifyResponse.payer }, 'payment verified, not settled');
+      logger.info(
+        { payer: verifyResponse.payer, tier },
+        'payment verified, not settled',
+      );
 
-      // ---- 6. Hand control to the route ----
+      // ---- 7. Hand control to the route ----
       (req as PaidRequest).x402 = {
         payload,
         avmPayload,
         verifyResponse,
         payer: verifyResponse.payer,
+        tier,
       };
 
       next();

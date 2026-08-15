@@ -1,27 +1,35 @@
 /**
  * x402 wiring for this service.
  *
- * Two subtleties, both discovered by probing the installed package rather than
+ * TIERED PRICING
+ * --------------
+ * The 402 response advertises three payment options rather than one. That is
+ * native to x402: the `accepts` array is a list, and a client picks whichever
+ * entry it is willing to pay for.
+ *
+ * Most x402 deployments put a single entry there. Using the array as intended
+ * is what lets the agent make an economic choice rather than simply paying a
+ * fixed toll.
+ *
+ * TWO SDK SUBTLETIES, both found by probing the installed package rather than
  * trusting the documentation:
  *
  * 1. `registerExactAvmScheme` IS exported at runtime from
- *    @x402-avm/avm/exact/server, but it has no entry in the shipped .d.ts
- *    files. Calling it from TypeScript therefore fails to compile. We use the
- *    fully-typed equivalent instead:
- *        server.register(network, new ExactAvmScheme())
+ *    @x402-avm/avm/exact/server, but has no entry in the shipped .d.ts files,
+ *    so calling it from TypeScript fails to compile. We use the fully-typed
+ *    equivalent: server.register(network, new ExactAvmScheme()).
  *
  * 2. TWO different classes are both named `ExactAvmScheme`:
- *      @x402-avm/avm/exact/server       — prices and builds requirements. No keys.
- *      @x402-avm/avm/exact/facilitator  — signs and submits. Requires a signer.
- *    A resource server must use the SERVER one. Importing from the package root
- *    is ambiguous, so we always use the explicit subpath. Getting this wrong
- *    would construct a class that expects a private key inside a service that
- *    must never hold one.
+ *      @x402-avm/avm/exact/server       prices and builds requirements, no keys
+ *      @x402-avm/avm/exact/facilitator  signs and submits, requires a signer
+ *    A resource server must use the SERVER one, so we always import from the
+ *    explicit subpath rather than the ambiguous package root.
  */
 
 import { HTTPFacilitatorClient, x402ResourceServer } from '@x402-avm/core/server';
 import { ExactAvmScheme } from '@x402-avm/avm/exact/server';
-import type { Caip2Network, PaymentRequirements } from '@atomicagent/shared';
+import { TIER_SPECS, TIERS } from '@atomicagent/shared';
+import type { Caip2Network, PaymentRequirements, Tier } from '@atomicagent/shared';
 import { env } from './env.js';
 import { logger } from './logger.js';
 
@@ -35,7 +43,7 @@ export const facilitatorClient = new HTTPFacilitatorClient({
 
 /**
  * The resource server, with the AVM exact scheme registered for our network.
- * `register` returns the server for chaining — verified in the type declarations.
+ * `register` returns the server for chaining — verified in the declarations.
  */
 export const resourceServer = new x402ResourceServer(facilitatorClient).register(
   env.network as Caip2Network,
@@ -48,25 +56,65 @@ logger.info(
 );
 
 /**
- * Builds the payment requirements this service advertises in its 402.
+ * Builds the payment requirements for one tier.
  *
- * `extra.feePayer` is filled in later from the facilitator's /supported
- * response, because only the facilitator knows which address it will use to
- * cover fees. The orchestrator fetches that once and applies it to the group.
- *
- * @returns the requirements for a price check
+ * @param tier - which price point
+ * @returns the requirements for that tier
  */
-export function buildPaymentRequirements(): PaymentRequirements {
+export function buildTierRequirements(tier: Tier): PaymentRequirements {
+  const spec = TIER_SPECS[tier];
+
   return {
     scheme: 'exact',
     network: env.network as Caip2Network,
     asset: env.asset.id,
-    amount: env.feeAtomic,
+    amount: spec.feeAtomic,
     payTo: env.payTo,
     maxTimeoutSeconds: 120,
     extra: {
       decimals: env.asset.decimals,
       name: env.asset.symbol,
+      // Non-standard, and deliberately so. The agent reads these to decide
+      // which tier is worth paying for.
+      tier: spec.tier,
+      method: spec.method,
+      confidence: spec.confidence,
+      latencyMs: spec.latencyMs,
     },
   };
+}
+
+/**
+ * Every tier this service offers, cheapest first.
+ *
+ * @returns the full accepts array for a 402 response
+ */
+export function buildAllTierRequirements(): PaymentRequirements[] {
+  return TIERS.map((tier) => buildTierRequirements(tier));
+}
+
+/**
+ * Identifies which tier a payment is for, by its amount.
+ *
+ * A client declares the tier in the requirements it claims to satisfy, but we
+ * verify against the amount rather than trusting the label. Paying the shallow
+ * fee and asking for a deep answer is exactly the abuse this prevents.
+ *
+ * @param amountAtomic - the amount actually offered
+ * @returns the tier that amount buys, or null if it matches none
+ */
+export function tierForAmount(amountAtomic: string): Tier | null {
+  for (const tier of TIERS) {
+    if (TIER_SPECS[tier].feeAtomic === amountAtomic) return tier;
+  }
+  return null;
+}
+
+/**
+ * Default requirements, used where a single entry is needed.
+ *
+ * @returns the shallow tier's requirements
+ */
+export function buildPaymentRequirements(): PaymentRequirements {
+  return buildTierRequirements('shallow');
 }

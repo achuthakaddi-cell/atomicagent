@@ -1,19 +1,24 @@
 /**
- * The seller-verification check route.
+ * The seller-verification check route, tiered.
  *
- * Reached only after x402VerifyOnly has confirmed a valid, unsettled payment.
+ * The tier is decided by what the client paid, not what it asked for. A
+ * shallow payment buys a cached registry snapshot that may predate a recent
+ * suspension; a deep payment retrieves dispute history and adverse filings.
+ * The agent escalates when a cheap answer is not good enough, which is only a
+ * meaningful decision because each tier costs money.
  *
  * TWO-STAGE RESOURCE RELEASE
  * --------------------------
- * Returns the verdict and a hash of the detail, but not the detail itself.
- * The full payload — including the GSTIN — is released after settlement.
+ * The verdict and a hash of the detail are returned; the detail itself —
+ * including the GSTIN — is withheld until settlement.
  */
 
 import { Router } from 'express';
 import type { Router as ExpressRouter } from 'express';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { ok, type CheckVerdict } from '@atomicagent/shared';
+import { ok } from '@atomicagent/shared';
+import { TIER_SPECS } from '@atomicagent/shared';
 import { runVerificationCheck, listSellers } from '../domain/sellerRegistry.js';
 import { x402VerifyOnly, requirePaymentContext } from '../middleware/x402Verify.js';
 import { checkLimiter } from '../middleware/rateLimit.js';
@@ -25,8 +30,7 @@ import { logger } from '../config/logger.js';
  *
  * With `declaration: true`, TypeScript must write a .d.ts entry for this
  * export. Router() infers a type from @types/express-serve-static-core, a
- * transitive dependency pnpm nests inside .pnpm/ — TypeScript can see it but
- * cannot write a portable import path to it (error TS2742).
+ * transitive dependency pnpm nests inside .pnpm/ (error TS2742).
  */
 export const checkRouter: ExpressRouter = Router();
 
@@ -50,8 +54,8 @@ function hashDetail(detail: unknown): string {
 /**
  * POST /check/verification
  *
- * Without X-PAYMENT  -> 402 with payment requirements
- * With X-PAYMENT     -> verify, run the check, return a verdict
+ * Without X-PAYMENT  -> 402 listing all three tiers
+ * With X-PAYMENT     -> verify, run the check at the paid tier, return a verdict
  */
 checkRouter.post(
   '/verification',
@@ -61,18 +65,38 @@ checkRouter.post(
     const context = requirePaymentContext(req);
     const body = checkBodySchema.parse(req.body);
 
-    const result = runVerificationCheck({ supplierId: body.supplierId });
+    // Simulate the latency of the tier that was paid for. A full audit takes
+    // longer than a cache read, and the UI shows that difference.
+    const latency = TIER_SPECS[context.tier].latencyMs;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(latency, 2600)));
 
-    const verdict: CheckVerdict = {
-      checkId: 'verification',
-      passed: result.passed,
+    const result = runVerificationCheck({
+      supplierId: body.supplierId,
+      tier: context.tier,
+    });
+
+    const verdict = {
+      checkId: 'verification' as const,
+      tier: result.tier,
+      confidence: result.confidence,
+      certainty: result.certainty,
+      // Retained for compatibility with the existing UI. Only a confirmed
+      // answer counts as a pass; ambiguous is explicitly not one.
+      passed: result.confidence === 'confirmed',
       reason: result.reason,
+      wouldResolve: result.wouldResolve ?? null,
       detailHash: hashDetail(result.detail),
       // detail deliberately omitted until settlement
     };
 
     logger.info(
-      { supplierId: body.supplierId, passed: result.passed, payer: context.payer },
+      {
+        supplierId: body.supplierId,
+        tier: context.tier,
+        confidence: result.confidence,
+        certainty: result.certainty,
+        payer: context.payer,
+      },
       'verification check complete',
     );
 
@@ -83,9 +107,18 @@ checkRouter.post(
 /**
  * GET /sellers
  *
- * Free and unpaid, with GSTINs withheld. Lets the demo UI show which suppliers
- * exist and why one might fail, without giving away the paid detail.
+ * Free and unpaid, with GSTINs and dispute history withheld. Those are paid
+ * information, so publishing them here would undercut the tier system.
  */
 checkRouter.get('/sellers', (_req, res) => {
   res.status(200).json(ok({ items: listSellers() }));
+});
+
+/**
+ * GET /tiers
+ *
+ * The price ladder, so a client can see the options before committing.
+ */
+checkRouter.get('/tiers', (_req, res) => {
+  res.status(200).json(ok({ tiers: TIER_SPECS }));
 });

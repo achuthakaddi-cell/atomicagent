@@ -37,8 +37,12 @@ import {
   type PaymentPayload,
   type VerifyResponse,
 } from '@atomicagent/shared';
+import type { Tier } from '@atomicagent/shared';
 import { logger } from '../config/logger.js';
-import { facilitatorClient, buildPaymentRequirements } from '../config/x402.js';
+import { facilitatorClient } from '../config/x402.js';
+import { buildAllTierRequirements } from '../config/x402.js';
+import { buildTierRequirements } from '../config/x402.js';
+import { tierForAmount } from '../config/x402.js';
 
 /** The slot in the atomic group this service is paid from. Constant: 1. */
 const OUR_PAYMENT_INDEX = PAYMENT_INDEX_BY_CHECK.price;
@@ -50,6 +54,14 @@ export interface X402Context {
   verifyResponse: VerifyResponse;
   /** Address that signed the payment, when the facilitator reports it. */
   payer: string | undefined;
+  /**
+   * Which tier the client actually paid for.
+   *
+   * Derived from the amount, not from any label the client supplied. A client
+   * that pays the shallow fee gets a shallow answer regardless of what it asks
+   * for.
+   */
+  tier: Tier;
 }
 
 /**
@@ -92,8 +104,8 @@ function decodePaymentHeader(header: string): unknown {
 /**
  * Builds the 402 response body.
  *
- * The client reads `accepts` to learn what to pay, and `paymentIndex` to learn
- * which slot of the shared atomic group belongs to this service.
+ * Advertises all three tiers. The `accepts` array is a list by design in x402;
+ * a client picks whichever entry it is willing to pay for.
  *
  * @returns the JSON body for a 402 response
  */
@@ -101,12 +113,13 @@ function build402Body() {
   return {
     x402Version: 2,
     error: 'Payment required',
-    accepts: [buildPaymentRequirements()],
+    accepts: buildAllTierRequirements(),
     // Not part of the x402 spec. Our own hint, so the orchestrator can build
     // the group without hardcoding slot numbers in three separate places.
     atomicAgent: {
       paymentIndex: OUR_PAYMENT_INDEX,
       checkId: 'price' as const,
+      tiered: true,
     },
   };
 }
@@ -172,8 +185,21 @@ export function x402VerifyOnly(): RequestHandler {
         );
       }
 
-      // ---- 4. Network and asset must match what we accept ----
-      const requirements = buildPaymentRequirements();
+      // ---- 4. Which tier did they pay for? ----
+      //
+      // Determined by the amount, never by a label. A client paying the
+      // shallow fee gets a shallow answer whatever it claims to want.
+      const tier = tierForAmount(payload.accepted.amount);
+
+      if (tier === null) {
+        throw new AppError(
+          ERROR_CODE.PAYMENT_INVALID,
+          'Payment amount does not match any offered tier',
+          { detail: 'offered ' + payload.accepted.amount },
+        );
+      }
+
+      const requirements = buildTierRequirements(tier);
 
       if (payload.accepted.network !== requirements.network) {
         throw new AppError(
@@ -260,6 +286,7 @@ export function x402VerifyOnly(): RequestHandler {
         avmPayload,
         verifyResponse,
         payer: verifyResponse.payer,
+        tier,
       };
 
       next();
