@@ -10,8 +10,9 @@ build/
 
 # environment — NEVER COMMIT
 .env
+.env.*
+!.env.example
 .env.local
-.env.*.local
 testnet-accounts.env
 *.mnemonic
 *.key
