@@ -1,99 +1,118 @@
 /**
- * Why Algorand.
+ * Why Algorand, as a flight through space.
  *
- * A side-by-side comparison of what conditional settlement costs on each chain.
- * The two columns rise at different rates as the reader scrolls, which gives
- * the section depth without being decorative — the slower column is the one
- * carrying more weight.
+ * The reader travels forward through a corridor of claims. Each row sits at a
+ * different depth and on alternating sides, so they pass either side of the
+ * viewport rather than scrolling by on a flat plane.
  *
- * The claim here is specific and checkable: EVM and Solana x402 deployments
- * need a contract or a channel to bind payments together. Algorand has the
- * primitive in the base protocol.
+ * Depths are deliberately close together and the cards are large. An earlier
+ * version spaced them widely, which looked impressive and was unreadable — the
+ * point of the section is the argument, not the effect.
  */
 
-import { useScrollProgress, mapRange } from './useScrollProgress.js';
+import { DepthStage, DepthLayer } from './DepthStage.js';
+
+const TRAVEL = 7000;
 
 const ROWS = [
-  { label: 'Bind several payments together', evm: 'Deploy an escrow contract', algo: 'Native atomic group' },
-  { label: 'Contract risk to audit', evm: 'Yes', algo: 'None — no contract' },
-  { label: 'Trusted hardware needed', evm: 'TEE, in published designs', algo: 'No' },
-  { label: 'Wallet signatures per run', evm: 'One per service', algo: 'One, for all five' },
-  { label: 'Network fee paid by buyer', evm: 'Gas, per transaction', algo: 'Zero — facilitator covers it' },
+  {
+    z: -1900,
+    x: -140,
+    label: 'Bind several payments together',
+    evm: 'Deploy an escrow contract',
+    algo: 'Native atomic group',
+  },
+  {
+    z: -3000,
+    x: 150,
+    label: 'Contract risk to audit',
+    evm: 'Yes',
+    algo: 'None — there is no contract',
+  },
+  {
+    z: -4100,
+    x: -130,
+    label: 'Trusted hardware needed',
+    evm: 'TEE, in published designs',
+    algo: 'No',
+  },
+  {
+    z: -5200,
+    x: 160,
+    label: 'Wallet signatures per run',
+    evm: 'One per service',
+    algo: 'One, covering all five',
+  },
+  {
+    z: -6300,
+    x: -120,
+    label: 'Network fee paid by buyer',
+    evm: 'Gas, per transaction',
+    algo: 'Zero — the facilitator covers it',
+  },
 ];
 
 export function Differentiator() {
-  const { ref, progress } = useScrollProgress<HTMLElement>();
-
-  const enter = mapRange(progress, 0.2, 0.5, 0, 1);
-
   return (
-    <section
-      ref={ref}
-      className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6 py-32"
-    >
-      <div className="w-full max-w-4xl">
-        <p className="mb-3 text-center font-mono text-[10px] uppercase tracking-[0.28em] text-graphite">
-          Why Algorand
-        </p>
+    <DepthStage length={7} travel={TRAVEL}>
+      {(p) => (
+        <>
+          {/* Title, closest, read and passed first. */}
+          <DepthLayer z={-700} progress={p} travel={TRAVEL}>
+            <div className="w-[88vw] max-w-3xl text-center">
+              <p className="mb-3 font-mono text-[11px] uppercase tracking-[0.28em] text-graphite">
+                Why Algorand
+              </p>
+              <h2 className="font-display text-4xl font-extrabold uppercase leading-[0.92] tracking-tightest text-chalk lg:text-6xl">
+                The primitive was already there
+              </h2>
+            </div>
+          </DepthLayer>
 
-        <h2 className="mb-4 text-center font-display text-3xl font-extrabold uppercase leading-[0.95] tracking-tightest text-chalk lg:text-5xl">
-          The primitive
-          <br />
-          was already there
-        </h2>
+          {ROWS.map((row) => (
+            <DepthLayer
+              key={row.label}
+              z={row.z}
+              x={row.x}
+              progress={p}
+              travel={TRAVEL}
+            >
+              <div className="w-[86vw] max-w-2xl rounded-lg border border-[var(--hairline)] bg-blueprint/90 p-8 backdrop-blur-md">
+                <p className="mb-5 font-mono text-[13px] uppercase tracking-[0.16em] text-chalk">
+                  {row.label}
+                </p>
 
-        <p className="mx-auto mb-12 max-w-xl text-center text-[14px] leading-relaxed text-graphite">
-          Research on x402 identifies the same gap: payment is not bound to
-          whether the service actually delivered. Published fixes reach for
-          trusted hardware or zero-knowledge proofs. On Algorand the mechanism
-          is in the protocol.
-        </p>
+                <div className="flex items-start gap-6">
+                  <div className="flex-1 border-r hairline pr-6">
+                    <p className="mb-2 font-mono text-[11px] uppercase tracking-wider text-[var(--graphite-dim)]">
+                      EVM · SVM
+                    </p>
+                    <p className="text-[17px] leading-snug text-graphite">{row.evm}</p>
+                  </div>
 
-        <div className="grid gap-4 md:grid-cols-2">
-          {/* EVM column rises slower, so it trails behind. */}
-          <div
-            className="rounded border hairline bg-blueprint/40 p-5"
-            style={{
-              opacity: enter,
-              transform: 'translateY(' + String((1 - enter) * 48) + 'px)',
-            }}
-          >
-            <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--graphite-dim)]">
-              EVM &amp; SVM x402
-            </p>
-            {ROWS.map((row) => (
-              <div key={row.label} className="border-t hairline py-2.5 first:border-t-0 first:pt-0">
-                <p className="text-[10px] text-[var(--graphite-dim)]">{row.label}</p>
-                <p className="mt-0.5 text-[13px] text-graphite">{row.evm}</p>
+                  <div className="flex-1">
+                    <p className="mb-2 font-mono text-[11px] uppercase tracking-wider text-brass">
+                      Algorand
+                    </p>
+                    <p className="text-[17px] font-medium leading-snug text-chalk">
+                      {row.algo}
+                    </p>
+                  </div>
+                </div>
               </div>
-            ))}
-          </div>
+            </DepthLayer>
+          ))}
 
-          {/* Algorand column rises faster and arrives first. */}
-          <div
-            className="rounded border border-[var(--brass-dim)] bg-brass/5 p-5"
-            style={{
-              opacity: enter,
-              transform: 'translateY(' + String((1 - enter) * 20) + 'px)',
-            }}
-          >
-            <p className="mb-4 font-mono text-[10px] uppercase tracking-[0.2em] text-brass">
-              Algorand x402
+          {/* The closing line, furthest away, reached last. */}
+          <DepthLayer z={-7400} progress={p} travel={TRAVEL}>
+            <p className="w-[84vw] max-w-xl text-center text-[16px] leading-relaxed text-graphite">
+              We did not invent atomic groups. Algorand gave us the primitive.
+              Our contribution is applying it to multi-service x402
+              orchestration.
             </p>
-            {ROWS.map((row) => (
-              <div key={row.label} className="border-t hairline py-2.5 first:border-t-0 first:pt-0">
-                <p className="text-[10px] text-[var(--graphite-dim)]">{row.label}</p>
-                <p className="mt-0.5 text-[13px] text-chalk">{row.algo}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <p className="mx-auto mt-8 max-w-xl text-center font-mono text-[11px] leading-relaxed text-[var(--graphite-dim)]">
-          We did not invent atomic groups. Algorand gave us the primitive. Our
-          contribution is applying it to multi-service x402 orchestration.
-        </p>
-      </div>
-    </section>
+          </DepthLayer>
+        </>
+      )}
+    </DepthStage>
   );
 }

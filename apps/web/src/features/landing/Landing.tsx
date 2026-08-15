@@ -1,15 +1,16 @@
 /**
  * The landing page.
  *
- * Six full-height sections over a fixed particle field. Several animation
- * techniques run at once — scroll-scrubbed sequences, character-split text,
- * parallax depth, a persistent progress rail — because layering is what makes
- * a page feel heavy rather than any single effect.
+ * Six full-height sections over a WebGL field. Several animation techniques
+ * run at once — scroll-scrubbed pinning, per-character physics, spring
+ * simulation, a reactive shader background — because layering is what makes a
+ * page feel heavy rather than any single effect.
  */
 
 import { useEffect, useState } from 'react';
 import { GLField } from './gl/GLField.js';
-import { SplitText } from './SplitText.js';
+import { SpeedVignette } from './Reactive.js';
+import { HeroPinned } from './HeroPinned.js';
 import { Problem } from './Problem.js';
 import { Mechanism } from './Mechanism.js';
 import { Differentiator } from './Differentiator.js';
@@ -18,9 +19,7 @@ import { TheBinding } from '../binding/TheBinding.js';
 import { usePageMotion, useInView } from './useScrollProgress.js';
 import type { RunPhase } from '../../store/useRunStore.js';
 
-/** Shared button styling, so the three call-to-action links stay consistent. */
-const BTN_BRASS = 'rounded border border-[var(--brass-dim)] bg-brass/10 px-7 py-3 font-mono text-[11px] uppercase tracking-[0.2em] text-brass transition-all duration-200 hover:border-brass hover:bg-brass/20';
-const BTN_GHOST = 'rounded border hairline px-6 py-3 font-mono text-[11px] uppercase tracking-[0.2em] text-graphite transition-colors duration-200 hover:border-[var(--graphite-dim)] hover:text-chalk';
+/** Header link styling. */
 const BTN_VERIFY = 'rounded border border-[var(--verify-dim)] px-4 py-1.5 font-mono text-[10px] uppercase tracking-[0.18em] text-verify transition-colors duration-200 hover:border-verify hover:bg-verify/10';
 
 /**
@@ -49,47 +48,6 @@ function TopBar({ progress }: { progress: number }) {
         <a href="/app" className={BTN_VERIFY}>Launch app</a>
       </div>
     </div>
-  );
-}
-
-/**
- * The hero.
- *
- * The headline assembles character by character, then the supporting lines
- * follow on staggered delays. Nothing on screen is static from the first frame.
- *
- * @returns the hero section
- */
-function Hero() {
-  return (
-    <section className="relative z-10 flex min-h-screen flex-col items-center justify-center px-6">
-      <p className="mb-5 font-mono text-[10px] uppercase tracking-[0.3em] text-graphite" style={{ animation: 'fadeIn 800ms 200ms both' }}>
-        Algorand · x402 · atomic settlement
-      </p>
-
-      <h1 className="max-w-5xl text-center font-display text-[12vw] font-extrabold uppercase leading-[0.88] tracking-tightest text-chalk sm:text-[9vw] lg:text-[7vw]">
-        <SplitText text="Payment bound" delay={300} />
-        <br />
-        <SplitText text="to outcome" delay={700} accent="outcome" />
-      </h1>
-
-      <p className="mt-8 max-w-lg text-center text-[15px] leading-relaxed text-graphite" style={{ animation: 'fadeIn 900ms 1400ms both' }}>
-        An AI sourcing agent for MSMEs. Three verification checks and the order
-        payment settle as one indivisible event, or nothing moves at all.
-      </p>
-
-      <div className="mt-10 flex gap-3" style={{ animation: 'fadeIn 900ms 1700ms both' }}>
-        <a href="/app" className={BTN_BRASS}>Run the agent</a>
-        <a href="#how" className={BTN_GHOST}>How it works</a>
-      </div>
-
-      <div className="absolute bottom-8 flex flex-col items-center gap-2" style={{ animation: 'fadeIn 900ms 2200ms both' }}>
-        <span className="font-mono text-[9px] uppercase tracking-[0.24em] text-[var(--graphite-dim)]">
-          Scroll
-        </span>
-        <span className="h-8 w-px animate-pulse bg-[var(--hairline)]" />
-      </div>
-    </section>
   );
 }
 
@@ -154,19 +112,19 @@ function BindingShowcase() {
 export function Landing() {
   const { progress, velocity } = usePageMotion();
 
-  // Settlement intensity ramps up across the binding section, which sits
-  // roughly 55 to 75 percent down the page. The field brightens and its
-  // contours tighten as the reader approaches it.
-  const settle = Math.max(
-    0,
-    Math.min(1, (progress - 0.5) / 0.25),
-  );
+  // Settlement intensity ramps across the binding section, which sits roughly
+  // half to three-quarters down the page. The field brightens and its contours
+  // tighten as the reader approaches it.
+  const settle = Math.max(0, Math.min(1, (progress - 0.5) / 0.25));
 
   return (
     <div className="relative min-h-screen bg-void">
       <GLField scroll={progress} velocity={velocity} settle={settle} />
+      <GLField scroll={progress} velocity={velocity} settle={settle} />
+      <SpeedVignette velocity={velocity} />
       <TopBar progress={progress} />
-      <Hero />
+      <TopBar progress={progress} />
+      <HeroPinned />
       <Problem />
       <Mechanism />
       <BindingShowcase />
