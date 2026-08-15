@@ -1,17 +1,24 @@
 /**
  * Application entry point.
  *
- * WalletManager is created ONCE at module scope, outside the component tree.
- * Creating it inside a component would tear down and rebuild the wallet
- * connection on every render, dropping an active Pera session.
+ * Two routes in one deployment:
+ *
+ *   /      the landing page — the pitch, scroll-driven, heavy animation
+ *   /app   the live application — wallet, checks, settlement
+ *
+ * WalletManager is created ONCE at module scope. Building it inside a component
+ * would tear down and rebuild the wallet connection on every render, dropping
+ * an active Pera session.
  *
  * Verified against @txnlab/use-wallet-react 4.6.0.
  */
 
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { NetworkId, WalletId, WalletManager, WalletProvider } from '@txnlab/use-wallet-react';
 import App from './App.js';
+import { Landing } from './features/landing/Landing.js';
 import './styles/tokens.css';
 
 /**
@@ -35,7 +42,12 @@ if (!rootElement) {
 ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
     <WalletProvider manager={walletManager}>
-      <App />
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route path="/app" element={<App />} />
+        </Routes>
+      </BrowserRouter>
     </WalletProvider>
   </React.StrictMode>,
 );

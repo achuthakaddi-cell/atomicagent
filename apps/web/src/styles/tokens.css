@@ -122,3 +122,19 @@
    outline: 2px solid var(--verify);
    outline-offset: 2px;
  }
+ /**
+ * Entrance fade for hero elements.
+ *
+ * Used with animation-fill-mode: both so elements are hidden before their
+ * delay elapses, rather than flashing visible then animating.
+ */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
