@@ -1,128 +1,154 @@
 /**
- * The mechanism section.
+ * The mechanism section, scroll-scrubbed.
  *
- * The five-slot atomic group assembles itself as the reader scrolls. Progress
- * through the section drives the animation directly rather than a timer, so
- * the reader controls the pace and can scrub backward to re-read it.
+ * The section pins and the reader's scroll drives the assembly of the atomic
+ * group directly. Slots fly in from alternating sides, the spine descends, the
+ * group locks, and the whole thing plays backward if they scroll up.
  *
  * The diagram encodes the real layout: slot 0 is the facilitator's fee payer,
- * slots 1 to 3 are the three checks, slot 4 is the order payment. Those are
- * the same indices the services verify against.
+ * slots 1 to 3 are the three checks, slot 4 is the order payment. Those are the
+ * same indices the services verify against.
  */
 
-import { useScrollProgress, mapRange } from './useScrollProgress.js';
+import { Pinned, map, easeOut } from './Pinned.js';
 
 const SLOTS = [
-  { index: 0, label: 'fee payer', detail: 'facilitator signs · covers all fees', who: 'facilitator' },
-  { index: 1, label: 'price check', detail: '0.01 · is the unit price within your ceiling', who: 'buyer' },
-  { index: 2, label: 'stock check', detail: '0.01 · is there enough, dispatched in time', who: 'buyer' },
-  { index: 3, label: 'seller check', detail: '0.01 · GST active, licence valid', who: 'buyer' },
-  { index: 4, label: 'order payment', detail: 'the money that actually buys the goods', who: 'buyer' },
+  { index: 0, label: 'fee payer', detail: 'facilitator signs · covers every fee', who: 'facilitator', from: -1 },
+  { index: 1, label: 'price check', detail: '0.01 · is the unit price within your ceiling', who: 'buyer', from: 1 },
+  { index: 2, label: 'stock check', detail: '0.01 · enough units, dispatched in time', who: 'buyer', from: -1 },
+  { index: 3, label: 'seller check', detail: '0.01 · GST active, licence valid', who: 'buyer', from: 1 },
+  { index: 4, label: 'order payment', detail: 'the money that actually buys the goods', who: 'buyer', from: -1 },
 ];
 
 export function Mechanism() {
-  const { ref, progress } = useScrollProgress<HTMLElement>();
+  return (
+    <Pinned length={4}>
+      {(p) => <MechanismFrame progress={p} />}
+    </Pinned>
+  );
+}
 
-  // The section is taller than the viewport, so progress maps across a long
-  // scroll. Slots appear in sequence, then the group id binds them.
-  const appear = mapRange(progress, 0.15, 0.62, 0, 1);
-  const bind = mapRange(progress, 0.6, 0.85, 0, 1);
+/**
+ * One frame of the mechanism animation.
+ *
+ * @param props - scrub progress, 0 to 1
+ * @returns the rendered frame
+ */
+function MechanismFrame({ progress }: { progress: number }) {
+  // The heading recedes as the diagram takes over.
+  const headOpacity = 1 - map(progress, 0.12, 0.28);
+  const headScale = 1 - map(progress, 0.12, 0.28) * 0.12;
+
+  // Slots arrive between 15% and 62% of the scrub.
+  const assemble = map(progress, 0.15, 0.62);
+
+  // The spine descends and locks the group between 60% and 85%.
+  const bind = map(progress, 0.6, 0.85);
+
+  // The whole diagram pulls tighter as it binds.
+  const tighten = easeOut(bind);
 
   return (
-    <section
-      ref={ref}
-      className="relative z-10 flex min-h-[220vh] flex-col items-center px-6 py-32"
-    >
-      <div className="sticky top-24 w-full max-w-4xl">
-        <p className="mb-3 text-center font-mono text-[10px] uppercase tracking-[0.28em] text-graphite">
+    <div className="relative w-full max-w-3xl px-6">
+      {/* Heading, receding. */}
+      <div
+        className="absolute inset-x-0 -top-4 text-center"
+        style={{
+          opacity: headOpacity,
+          transform: 'scale(' + String(headScale) + ') translateY(' + String((1 - headOpacity) * -40) + 'px)',
+        }}
+      >
+        <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.28em] text-graphite">
           How it works
         </p>
-
-        <h2 className="mb-3 text-center font-display text-3xl font-extrabold uppercase leading-[0.95] tracking-tightest text-chalk lg:text-5xl">
-          One group.
-          <br />
-          Five transactions.
+        <h2 className="font-display text-3xl font-extrabold uppercase leading-[0.95] tracking-tightest text-chalk lg:text-5xl">
+          One group. Five transactions.
         </h2>
+      </div>
 
-        <p className="mx-auto mb-14 max-w-lg text-center text-[14px] leading-relaxed text-graphite">
-          The agent builds a single Algorand atomic transaction group. Every
-          transaction in it shares one group identifier, and that shared value
-          is what makes them indivisible.
-        </p>
+      {/* The group assembling. */}
+      <div
+        className="relative"
+        style={{
+          transform: 'translateY(' + String(map(progress, 0.12, 0.32) * -30 + 60) + 'px)',
+        }}
+      >
+        {SLOTS.map((slot, i) => {
+          // Each slot gets its own window inside the assemble range.
+          const local = easeOut(map(assemble, i * 0.15, i * 0.15 + 0.32));
+          const bound = bind > 0.05;
 
-        <div className="space-y-2.5">
-          {SLOTS.map((slot, i) => {
-            // Each slot has its own window within the appear range.
-            const local = mapRange(appear, i * 0.16, i * 0.16 + 0.3, 0, 1);
-            const bound = bind > 0.1;
+          // Slots fly in from alternating sides and rotate into place.
+          const offsetX = (1 - local) * slot.from * 320;
+          const rotate = (1 - local) * slot.from * 12;
 
-            return (
+          // Rows pull toward each other as the group binds.
+          const gap = (i - 2) * (1 - tighten * 0.35) * 4;
+
+          return (
+            <div
+              key={slot.index}
+              className="mb-2 flex items-center gap-4"
+              style={{
+                opacity: local,
+                transform:
+                  'translateX(' + String(offsetX) + 'px) ' +
+                  'translateY(' + String(gap) + 'px) ' +
+                  'rotate(' + String(rotate) + 'deg)',
+              }}
+            >
+              <span className="w-6 shrink-0 text-right font-mono text-[11px] text-[var(--graphite-dim)]">
+                {slot.index}
+              </span>
+
               <div
-                key={slot.index}
-                className="flex items-center gap-4"
+                className="flex-1 rounded border px-4 py-3"
                 style={{
-                  opacity: local,
-                  transform: 'translateX(' + String((1 - local) * -40) + 'px)',
+                  borderColor: bound ? 'var(--brass-dim)' : 'var(--hairline)',
+                  background: bound ? 'rgba(232,184,75,' + String(0.03 + tighten * 0.06) + ')' : 'rgba(13,25,38,0.55)',
+                  boxShadow: bound ? '0 0 ' + String(tighten * 26) + 'px -10px var(--brass)' : 'none',
                 }}
               >
-                <span className="w-6 shrink-0 text-right font-mono text-[11px] text-[var(--graphite-dim)]">
-                  {slot.index}
-                </span>
-
-                <div
-                  className="flex-1 rounded border px-4 py-3 transition-colors duration-500"
-                  style={{
-                    borderColor: bound ? 'var(--brass-dim)' : 'var(--hairline)',
-                    background: bound
-                      ? 'rgba(232,184,75,0.05)'
-                      : 'rgba(13,25,38,0.5)',
-                  }}
-                >
-                  <div className="flex items-baseline justify-between gap-3">
-                    <span className="text-[13px] font-medium text-chalk">
-                      {slot.label}
-                    </span>
-                    <span
-                      className="shrink-0 font-mono text-[9px] uppercase tracking-wider"
-                      style={{
-                        color:
-                          slot.who === 'facilitator'
-                            ? 'var(--verify)'
-                            : 'var(--graphite-dim)',
-                      }}
-                    >
-                      {slot.who}
-                    </span>
-                  </div>
-                  <p className="mt-0.5 font-mono text-[10px] text-[var(--graphite-dim)]">
-                    {slot.detail}
-                  </p>
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="text-[13px] font-medium text-chalk">{slot.label}</span>
+                  <span
+                    className="shrink-0 font-mono text-[9px] uppercase tracking-wider"
+                    style={{ color: slot.who === 'facilitator' ? 'var(--verify)' : 'var(--graphite-dim)' }}
+                  >
+                    {slot.who}
+                  </span>
                 </div>
+                <p className="mt-0.5 font-mono text-[10px] text-[var(--graphite-dim)]">
+                  {slot.detail}
+                </p>
               </div>
-            );
-          })}
-        </div>
+            </div>
+          );
+        })}
 
-        {/* The binding rail. Draws down the left edge as the group locks. */}
-        <div className="relative mt-6 h-8">
-          <div
-            className="absolute left-[13px] top-0 w-[2px] rounded"
-            style={{
-              height: String(bind * 100) + '%',
-              background: 'var(--brass)',
-              boxShadow: bind > 0.2 ? '0 0 14px var(--brass)' : 'none',
-              transform: 'translateY(-320px)',
-              transformOrigin: 'top',
-            }}
-          />
-          <p
-            className="text-center font-mono text-[10px] uppercase tracking-[0.24em]"
-            style={{ opacity: bind, color: 'var(--brass)' }}
-          >
-            Bound by one group id
-          </p>
-        </div>
+        {/* The spine. Descends through the stack as the group binds. */}
+        <div
+          className="pointer-events-none absolute left-[14px] top-0 w-[2px] rounded"
+          style={{
+            height: String(tighten * 100) + '%',
+            background: 'var(--brass)',
+            boxShadow: tighten > 0.1 ? '0 0 ' + String(tighten * 20) + 'px var(--brass)' : 'none',
+            opacity: tighten,
+          }}
+        />
       </div>
-    </section>
+
+      {/* The claim, arriving last. */}
+      <p
+        className="mt-8 text-center font-mono text-[11px] uppercase tracking-[0.24em]"
+        style={{
+          opacity: map(progress, 0.82, 0.95),
+          color: 'var(--brass)',
+          transform: 'translateY(' + String((1 - map(progress, 0.82, 0.95)) * 14) + 'px)',
+        }}
+      >
+        Bound by one group id
+      </p>
+    </div>
   );
 }
