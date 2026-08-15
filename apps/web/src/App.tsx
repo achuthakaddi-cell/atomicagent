@@ -16,6 +16,7 @@ import { SourcingForm } from './features/sourcing/SourcingForm.js';
 import { CheckCard } from './features/checks/CheckCard.js';
 import { Aborted, Failed, Settled } from './features/settlement/Outcome.js';
 import { useSourcingRun } from './hooks/useSourcingRun.js';
+import { TheBinding } from './features/binding/TheBinding.js';
 import { CHECK_IDS, checkStatus, isBusy, useRunStore } from './store/useRunStore.js';
 import { formatAmount } from './lib/format.js';
 
@@ -211,10 +212,13 @@ export default function App() {
                 <PhaseHeading phase={store.phase} />
 
                 {/* Where THE BINDING renders in stage C. */}
-                <div className="mt-6 flex h-40 w-full items-center justify-center rounded border hairline bg-blueprint/30">
-                  <span className="font-mono text-[10px] uppercase tracking-[0.24em] text-[var(--graphite-dim)]">
-                    The Binding — stage C
-                  </span>
+                <div className="mt-2 w-full max-w-4xl">
+                  <TheBinding
+                    phase={store.phase}
+                    groupId={null}
+                    verdicts={store.verdicts}
+                    failedChecks={store.failedChecks}
+                  />
                 </div>
 
                 <div className="mt-6 flex w-full gap-3">

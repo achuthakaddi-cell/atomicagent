@@ -151,6 +151,8 @@ export function useSourcingRun(): SourcingRun {
 
       // ---- 4a. Abort. Nothing was submitted. ----
       if (isAbort(verified)) {
+        // Hold briefly so the shatter animation is visible.
+        await new Promise((resolve) => setTimeout(resolve, 1_600));
         store.applyAbort(verified);
         return;
       }
@@ -182,8 +184,23 @@ export function useSourcingRun(): SourcingRun {
       // ---- 4b. Settle ----
       store.beginSettle();
 
+      // The binding animation runs for roughly three seconds. Settlement often
+      // completes faster than that, which would cut the animation off mid-slam.
+      // We hold the settling phase for a minimum duration so the moment lands.
+      //
+      // This delays the UI, never the chain. The transaction is submitted the
+      // instant the request goes out.
+      const settleStartedAt = Date.now();
+      const MINIMUM_SETTLE_MS = 3_200;
+
       try {
         const settled = await requestSettle(quote.runId);
+
+        const remaining = MINIMUM_SETTLE_MS - (Date.now() - settleStartedAt);
+        if (remaining > 0) {
+          await new Promise((resolve) => setTimeout(resolve, remaining));
+        }
+
         store.applySettlement(settled);
       } catch (cause) {
         const error = cause as ApiError;
