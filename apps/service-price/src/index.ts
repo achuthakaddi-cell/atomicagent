@@ -89,7 +89,9 @@ app.use('/check', checkRouter);
 app.use(notFoundHandler);
 app.use(errorHandler);
 
-const server = app.listen(env.port, () => {
+// 0.0.0.0 rather than the default localhost. A container that binds only to
+// localhost is unreachable from outside itself.
+const server = app.listen(env.port, '0.0.0.0', () => {
   logger.info(
     {
       port: env.port,

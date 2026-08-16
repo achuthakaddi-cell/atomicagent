@@ -125,7 +125,10 @@ async function start(): Promise<void> {
     }
   }
 
-  const server = app.listen(env.port, () => {
+  // 0.0.0.0 rather than the default localhost. A container that binds only to
+  // localhost is unreachable from outside itself, which presents as a service
+  // that starts cleanly and then fails every health check.
+  const server = app.listen(env.port, '0.0.0.0', () => {
     logger.info(
       {
         port: env.port,
