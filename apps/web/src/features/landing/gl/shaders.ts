@@ -142,12 +142,16 @@ export const FRAGMENT_SHADER = /* glsl */ `
 
     // ---- colour ----
     //
-    // Cold blueprint blue at the top of the page, warming toward brass as the
-    // reader descends. The page literally heats up as it approaches settlement.
-    vec3 cold = mix(BLUEPRINT, PENDING, 0.5);
-    vec3 warm = mix(PENDING, BRASS, smoothstep(0.35, 1.0, uScroll));
-    vec3 tint = mix(cold, warm, smoothstep(0.1, 0.85, uScroll));
-    tint = mix(tint, BRASS, uSettle * 0.7);
+    // One palette throughout: deep blueprint blue, brightening slightly as the
+    // reader descends. An earlier version warmed toward brass near settlement,
+    // which broke the page into two visual halves. Brass is reserved for
+    // settlement itself, so the background must not compete with it.
+    vec3 deep = mix(BLUEPRINT, PENDING, 0.35);
+    vec3 bright = mix(BLUEPRINT, PENDING, 0.75);
+    vec3 tint = mix(deep, bright, smoothstep(0.0, 1.0, uScroll));
+
+    // Settlement lifts the field's intensity without changing its hue.
+    tint = mix(tint, PENDING, uSettle * 0.35);
 
     vec3 colour = VOID;
     colour += tint * lines * (0.16 + uSettle * 0.5);

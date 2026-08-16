@@ -20,6 +20,7 @@ const repoRoot = path.resolve(here, '../../../..');
 dotenv.config({ path: path.join(repoRoot, '.env') });
 
 const envSchema = z.object({
+  PORT: z.coerce.number().int().positive().optional(),
   PORT_SERVICE_PRICE: z.coerce.number().int().positive().default(4101),
 
   X402_NETWORK: z
@@ -64,7 +65,7 @@ if (!parsed.success) {
 const raw = parsed.data;
 
 export const env = {
-  port: raw.PORT_SERVICE_PRICE,
+  port: raw.PORT ?? raw.PORT_SERVICE_PRICE,
   network: raw.X402_NETWORK,
   facilitatorUrl: raw.FACILITATOR_URL,
   payTo: raw.SVC_PRICE_ADDRESS,

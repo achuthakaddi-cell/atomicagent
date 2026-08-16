@@ -27,6 +27,10 @@ const addressSchema = (label: string) =>
   z.string().regex(ALGORAND_ADDRESS_REGEX, `${label} must be a 58-char Algorand address`);
 
 const envSchema = z.object({
+  // Railway and most container platforms assign a port at runtime via PORT.
+  // The service-specific variable stays as the local default, so `pnpm dev`
+  // is unchanged while production binds wherever the platform says.
+  PORT: z.coerce.number().int().positive().optional(),
   PORT_ORCHESTRATOR: z.coerce.number().int().positive().default(4100),
 
   X402_NETWORK: z
@@ -79,7 +83,7 @@ if (!parsed.success) {
 const raw = parsed.data;
 
 export const env = {
-  port: raw.PORT_ORCHESTRATOR,
+  port: raw.PORT ?? raw.PORT_ORCHESTRATOR,
   network: raw.X402_NETWORK,
   facilitatorUrl: raw.FACILITATOR_URL,
 
