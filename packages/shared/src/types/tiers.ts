@@ -139,24 +139,30 @@ export function decideEscalation(options: {
   const spent = BigInt(spentAtomic);
   const remaining = budget - spent;
 
-  // Rule 1: a refuted answer is final. Paying more cannot make a fail a pass,
-  // and spending to confirm bad news is exactly the waste we are avoiding.
+  // Rule 1: a refuted answer is final. Paying more cannot turn a refusal into
+  // a pass, and spending to confirm bad news is exactly the waste we avoid.
   if (result.confidence === 'refuted') {
     return {
       escalate: false,
       nextTier: null,
-      rationale: checkId + ' failed conclusively. Escalating cannot change a refusal.',
+      rationale:
+        checkId + ' failed conclusively. Escalating cannot change a refusal.',
     };
   }
 
-  // Rule 2: certainty above the threshold is good enough.
+  // Rule 2: certainty at or above the threshold is good enough, whatever the
+  // verdict label says.
+  //
+  // A confirmed answer from a tier that is only 68% reliable is a 68%
+  // confirmation, not a certainty. Reading the number rather than the label is
+  // what stops the threshold being meaningless.
   if (result.certainty >= policy.escalateBelow) {
     return {
       escalate: false,
       nextTier: null,
       rationale:
         checkId + ' returned ' + Math.round(result.certainty * 100) +
-        '% certainty at ' + result.tier + ' tier, above the ' +
+        '% certainty at ' + result.tier + ' tier, at or above the ' +
         Math.round(policy.escalateBelow * 100) + '% threshold. No escalation needed.',
     };
   }
@@ -175,7 +181,7 @@ export function decideEscalation(options: {
     };
   }
 
-  // Rule 4: the budget must cover it, with the reserve intact.
+  // Rule 4: the budget must cover it, with the reserve left intact.
   const nextFee = BigInt(TIER_SPECS[nextTier].feeAtomic);
   const reserve = (budget * BigInt(Math.round(policy.reserveFraction * 100))) / 100n;
 

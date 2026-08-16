@@ -22,12 +22,14 @@ import { randomUUID } from 'node:crypto';
 import {
   AppError,
   ERROR_CODE,
+  DEFAULT_POLICY,
   type CheckId,
   type CheckQuote,
-  type CheckVerdict,
   type RunPhase,
   type SourcingRequest,
+  type Tier,
 } from '@atomicagent/shared';
+import type { SpendLedger, TieredVerdict } from './spendPlanner.js';
 import { logger } from '../config/logger.js';
 
 /** Everything known about one run. */
@@ -59,8 +61,22 @@ export interface Run {
   /** Sum of the three check fees, atomic units. */
   totalFeesAtomic: string;
 
-  /** Verdicts collected during the verify fan-out. */
-  verdicts: CheckVerdict[];
+  /** Verdicts collected during the most recent verify round. */
+  verdicts: TieredVerdict[];
+
+  /** Which tier each check is currently being paid for. */
+  tiers: Record<CheckId, Tier>;
+
+  /**
+   * Cumulative fee owed to each check across every round.
+   *
+   * A check escalated from shallow to standard is owed both fees, because the
+   * service did both pieces of work.
+   */
+  cumulativeFees: Record<CheckId, string>;
+
+  /** The spend audit trail: every decision, with its rationale. */
+  ledger: SpendLedger;
 
   /** Transaction id, present only after a successful settle. */
   txId: string | null;
@@ -95,7 +111,10 @@ const ALLOWED_TRANSITIONS: Readonly<Record<RunPhase, readonly RunPhase[]>> = {
   idle: ['quoting', 'error'],
   quoting: ['awaiting_signature', 'aborted', 'error'],
   awaiting_signature: ['verifying', 'aborted', 'error'],
-  verifying: ['settling', 'aborted', 'error'],
+  // verifying -> awaiting_signature is the escalation path: the agent decided
+  // a cheap answer was too uncertain, so the group is rebuilt at a higher tier
+  // and the user is asked to approve the extra spend.
+  verifying: ['settling', 'awaiting_signature', 'aborted', 'error'],
   settling: ['settled', 'aborted', 'error'],
   settled: [],
   aborted: [],
@@ -157,6 +176,23 @@ export function createRun(
     orderTotalAtomic: '0',
     totalFeesAtomic: '0',
     verdicts: [],
+    tiers: {
+      price: 'shallow',
+      availability: 'shallow',
+      verification: 'shallow',
+    },
+    cumulativeFees: {
+      price: '0',
+      availability: '0',
+      verification: '0',
+    },
+    ledger: {
+      policy: DEFAULT_POLICY,
+      decisions: [],
+      spentAtomic: '0',
+      remainingAtomic: DEFAULT_POLICY.budgetAtomic,
+      rounds: 0,
+    },
     txId: null,
     abortReason: null,
     settleLocked: false,
@@ -269,40 +305,61 @@ export function abortRun(run: Run, reason: string): void {
 }
 
 /**
- * Whether every check in a run passed.
+ * Whether every check reached a confirmed answer.
  *
- * Requires a verdict from all three checks. A missing verdict counts as a
- * failure — silence is never treated as consent to spend money.
+ * An ambiguous answer is NOT a pass. If the agent ran out of budget before
+ * resolving one, the run must abort rather than settle on a guess — spending
+ * real money on an uncertain verification is precisely the failure mode this
+ * project exists to prevent.
  *
  * @param run - the run to inspect
- * @returns true only if all three checks returned a pass
+ * @returns true only if all three confirmed
  */
 export function allChecksPassed(run: Run): boolean {
   const required: readonly CheckId[] = ['price', 'availability', 'verification'];
 
   for (const checkId of required) {
     const verdict = run.verdicts.find((entry) => entry.checkId === checkId);
-    if (!verdict || !verdict.passed) return false;
+    if (!verdict || verdict.confidence !== 'confirmed') return false;
   }
 
   return true;
 }
 
 /**
- * Lists the checks that did not pass.
+ * Lists the checks that did not confirm.
  *
  * @param run - the run to inspect
- * @returns ids of failed or missing checks
+ * @returns ids of unresolved or missing checks
  */
 export function failedChecks(run: Run): CheckId[] {
   const required: readonly CheckId[] = ['price', 'availability', 'verification'];
 
   return required.filter((checkId) => {
     const verdict = run.verdicts.find((entry) => entry.checkId === checkId);
-    return !verdict || !verdict.passed;
+    return !verdict || verdict.confidence !== 'confirmed';
   });
 }
 
+/**
+ * Adds a round's fees to the cumulative total for each check.
+ *
+ * @param run - the run to update, mutated in place
+ * @param fees - fee paid this round, per check
+ */
+export function addRoundFees(
+  run: Run,
+  fees: Partial<Record<CheckId, string>>,
+): void {
+  for (const checkId of ['price', 'availability', 'verification'] as const) {
+    const fee = fees[checkId];
+    if (fee === undefined || fee === '0') continue;
+    run.cumulativeFees[checkId] = (
+      BigInt(run.cumulativeFees[checkId]) + BigInt(fee)
+    ).toString();
+  }
+  run.updatedAt = Date.now();
+}
 /**
  * Current store size. Used by the health endpoint.
  *

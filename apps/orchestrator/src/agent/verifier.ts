@@ -1,5 +1,5 @@
 /**
- * The verify fan-out. Where one signed group satisfies three services.
+ * The verify fan-out, tier-aware.
  *
  * THE MECHANISM
  * -------------
@@ -16,39 +16,40 @@
  * as { paymentGroup: string[]; paymentIndex: number } precisely so a group can
  * carry more than one payment.
  *
- * WHAT DOES NOT HAPPEN HERE
- * -------------------------
- * No money moves. Every service calls facilitator.verify() and stops. The
- * facilitator simulates the group on chain and reports whether it would
- * succeed. Settlement is a separate, later, single call from settler.ts.
+ * TIERS
+ * -----
+ * Each service is paid at whichever tier the agent chose for it this round.
+ * A service determines the tier from the amount received, never from a label,
+ * so the agent cannot ask for a deep answer at a shallow price.
  *
  * FAILURE IS THE DEFAULT
  * ----------------------
  * A timeout, an unreachable service, a malformed response, or a missing
  * verdict all count as FAILURE. Silence is never read as consent to spend
- * money. Only an explicit pass from all three opens the settle gate.
+ * money.
  */
 
 import { AppError } from '@atomicagent/shared';
 import { ERROR_CODE } from '@atomicagent/shared';
 import { PAYMENT_INDEX_BY_CHECK } from '@atomicagent/shared';
 import { X402_VERSION } from '@atomicagent/shared';
+import { TIER_SPECS } from '@atomicagent/shared';
 import type { CheckId } from '@atomicagent/shared';
-import type { CheckQuote } from '@atomicagent/shared';
-import type { CheckVerdict } from '@atomicagent/shared';
 import type { Caip2Network } from '@atomicagent/shared';
 import type { PaymentPayload } from '@atomicagent/shared';
 import type { SourcingRequest } from '@atomicagent/shared';
+import type { Tier } from '@atomicagent/shared';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
 import { requestVerification } from '../clients/serviceClient.js';
 import { buildCheckBody } from './quoteCollector.js';
+import type { TieredVerdict } from './spendPlanner.js';
 
 /** Result of verifying one check, including failures. */
 export interface VerifyOutcome {
   checkId: CheckId;
-  verdict: CheckVerdict | null;
-  /** Set when the call itself failed rather than the check returning false. */
+  verdict: TieredVerdict | null;
+  /** Set when the call itself failed rather than the check returning a verdict. */
   error: string | null;
 }
 
@@ -56,7 +57,10 @@ export interface VerifyOutcome {
 export interface VerifyInput {
   runId: string;
   request: SourcingRequest;
-  quotes: CheckQuote[];
+  /** Which tier each check is being paid for this round. */
+  tiers: Record<CheckId, Tier>;
+  /** Where each service is paid. */
+  payTo: Record<CheckId, string>;
   /** The signed group, base64, in slot order. Identical for all three calls. */
   signedGroup: string[];
 }
@@ -66,32 +70,39 @@ export interface VerifyInput {
  *
  * The paymentGroup is the SAME array for every service. Only paymentIndex and
  * the accepted requirements change. That single difference is what lets one
- * signature pay three independent parties.
+ * signature pay three independent parties at three different price points.
  *
  * @param checkId - which service this header is for
- * @param quote - that service's quote
+ * @param tier - the tier being paid for
+ * @param payTo - that service's payee address
  * @param signedGroup - the full signed group
  * @returns base64 X-PAYMENT header value
  */
 function buildPaymentHeader(
   checkId: CheckId,
-  quote: CheckQuote,
+  tier: Tier,
+  payTo: string,
   signedGroup: string[],
 ): string {
   const paymentIndex = PAYMENT_INDEX_BY_CHECK[checkId];
+  const spec = TIER_SPECS[tier];
 
   const payload: PaymentPayload = {
     x402Version: X402_VERSION,
     accepted: {
       scheme: 'exact',
       network: env.network as Caip2Network,
-      asset: quote.asset,
-      amount: quote.feeAtomic,
-      payTo: quote.payTo,
-      maxTimeoutSeconds: quote.maxTimeoutSeconds,
+      asset: env.asset.id,
+      amount: spec.feeAtomic,
+      payTo,
+      maxTimeoutSeconds: 120,
       extra: {
         decimals: env.asset.decimals,
         name: env.asset.symbol,
+        tier: spec.tier,
+        method: spec.method,
+        confidence: spec.confidence,
+        latencyMs: spec.latencyMs,
       },
     },
     payload: {
@@ -116,7 +127,7 @@ function parseVerdict(
   checkId: CheckId,
   status: number,
   body: unknown,
-): CheckVerdict {
+): TieredVerdict {
   // A 402 here means the facilitator rejected the payment. That is a payment
   // problem, not a business-rule failure, and deserves a different message.
   if (status === 402) {
@@ -129,7 +140,7 @@ function parseVerdict(
   }
 
   if (status !== 200) {
-    const errorBody = body as { message?: string; code?: string };
+    const errorBody = body as { message?: string };
     throw new AppError(
       ERROR_CODE.UPSTREAM_UNAVAILABLE,
       'The ' + checkId + ' service returned HTTP ' + String(status),
@@ -146,13 +157,15 @@ function parseVerdict(
     );
   }
 
-  const data = envelope.data as Partial<CheckVerdict>;
+  const data = envelope.data as Partial<TieredVerdict>;
 
   if (
     data.checkId !== checkId ||
-    typeof data.passed !== 'boolean' ||
+    typeof data.confidence !== 'string' ||
+    typeof data.certainty !== 'number' ||
     typeof data.reason !== 'string' ||
-    typeof data.detailHash !== 'string'
+    typeof data.detailHash !== 'string' ||
+    typeof data.tier !== 'string'
   ) {
     throw new AppError(
       ERROR_CODE.UPSTREAM_UNAVAILABLE,
@@ -162,8 +175,12 @@ function parseVerdict(
 
   return {
     checkId,
-    passed: data.passed,
+    tier: data.tier as Tier,
+    confidence: data.confidence as TieredVerdict['confidence'],
+    certainty: data.certainty,
+    passed: data.confidence === 'confirmed',
     reason: data.reason,
+    wouldResolve: data.wouldResolve ?? null,
     detailHash: data.detailHash,
   };
 }
@@ -176,32 +193,39 @@ function parseVerdict(
  * failed. Errors are captured into the outcome instead.
  *
  * @param checkId - which check to run
- * @param input - the run, request, quotes and signed group
+ * @param input - the run, request, tiers and signed group
  * @returns the outcome, whether it succeeded or not
  */
 async function verifyOne(
   checkId: CheckId,
   input: VerifyInput,
 ): Promise<VerifyOutcome> {
-  const quote = input.quotes.find((entry) => entry.checkId === checkId);
+  const tier = input.tiers[checkId];
+  const payTo = input.payTo[checkId];
 
-  if (!quote) {
+  if (!tier || !payTo) {
     return {
       checkId,
       verdict: null,
-      error: 'No quote on file for this check',
+      error: 'No tier or payee on file for this check',
     };
   }
 
   try {
-    const header = buildPaymentHeader(checkId, quote, input.signedGroup);
+    const header = buildPaymentHeader(checkId, tier, payTo, input.signedGroup);
     const body = buildCheckBody(checkId, input.request);
 
     const response = await requestVerification(checkId, body, header);
     const verdict = parseVerdict(checkId, response.status, response.body);
 
     logger.info(
-      { runId: input.runId, checkId, passed: verdict.passed },
+      {
+        runId: input.runId,
+        checkId,
+        tier: verdict.tier,
+        confidence: verdict.confidence,
+        certainty: verdict.certainty,
+      },
       'check verified',
     );
 
@@ -222,19 +246,21 @@ async function verifyOne(
 
 /** What the fan-out returns. */
 export interface VerifyFanOutResult {
-  verdicts: CheckVerdict[];
+  verdicts: TieredVerdict[];
   outcomes: VerifyOutcome[];
-  allPassed: boolean;
-  failedChecks: CheckId[];
-  /** Human-readable summary of why the run cannot settle, if it cannot. */
-  failureSummary: string | null;
+  /** True only when all three returned an explicit confirmed answer. */
+  allConfirmed: boolean;
+  /** Checks that did not confirm, whether refuted, ambiguous or absent. */
+  unresolved: CheckId[];
+  /** Human-readable summary of why the run cannot settle yet. */
+  summary: string | null;
 }
 
 /**
  * Runs all three checks in parallel against the same signed group.
  *
- * @param input - the run, request, quotes and signed group
- * @returns verdicts, and whether the settle gate may open
+ * @param input - the run, request, tiers and signed group
+ * @returns verdicts and whether settlement may proceed
  */
 export async function verifyAll(
   input: VerifyInput,
@@ -242,7 +268,11 @@ export async function verifyAll(
   const startedAt = Date.now();
 
   logger.info(
-    { runId: input.runId, groupSize: input.signedGroup.length },
+    {
+      runId: input.runId,
+      groupSize: input.signedGroup.length,
+      tiers: input.tiers,
+    },
     'verifying all three checks against one signed group',
   );
 
@@ -252,45 +282,45 @@ export async function verifyAll(
     verifyOne('verification', input),
   ]);
 
-  const verdicts: CheckVerdict[] = [];
-  const failedChecks: CheckId[] = [];
-  const failureReasons: string[] = [];
+  const verdicts: TieredVerdict[] = [];
+  const unresolved: CheckId[] = [];
+  const reasons: string[] = [];
 
   for (const outcome of outcomes) {
     if (outcome.verdict) {
       verdicts.push(outcome.verdict);
 
-      if (!outcome.verdict.passed) {
-        failedChecks.push(outcome.checkId);
-        failureReasons.push(outcome.checkId + ': ' + outcome.verdict.reason);
+      if (outcome.verdict.confidence !== 'confirmed') {
+        unresolved.push(outcome.checkId);
+        reasons.push(outcome.checkId + ': ' + outcome.verdict.reason);
       }
     } else {
-      // No verdict at all. Counts as a failure, never as an unknown to be
+      // No verdict at all. Counts as unresolved, never as an unknown to be
       // resolved optimistically.
-      failedChecks.push(outcome.checkId);
-      failureReasons.push(
-        outcome.checkId + ': ' + (outcome.error ?? 'no response'),
-      );
+      unresolved.push(outcome.checkId);
+      reasons.push(outcome.checkId + ': ' + (outcome.error ?? 'no response'));
     }
   }
 
-  const allPassed = failedChecks.length === 0 && verdicts.length === 3;
+  const allConfirmed = unresolved.length === 0 && verdicts.length === 3;
 
   logger.info(
     {
       runId: input.runId,
       ms: Date.now() - startedAt,
-      allPassed,
-      failedChecks,
+      allConfirmed,
+      unresolved,
     },
-    allPassed ? 'all checks passed, settlement may proceed' : 'checks failed, settlement blocked',
+    allConfirmed
+      ? 'all checks confirmed, settlement may proceed'
+      : 'checks unresolved, settlement blocked',
   );
 
   return {
     verdicts,
     outcomes,
-    allPassed,
-    failedChecks,
-    failureSummary: allPassed ? null : failureReasons.join('; '),
+    allConfirmed,
+    unresolved,
+    summary: allConfirmed ? null : reasons.join('; '),
   };
 }

@@ -93,7 +93,7 @@ export const TIMEOUTS_MS = {
   /** Collecting the 402 challenge from one service. */
   QUOTE: 6_000,
   /** Verifying one service's slot in the group. */
-  VERIFY: 8_000,
+  VERIFY: 25_000,
   /** Settling the group through the facilitator. */
   SETTLE: 20_000,
   /** Waiting for algod to confirm a submitted group. */

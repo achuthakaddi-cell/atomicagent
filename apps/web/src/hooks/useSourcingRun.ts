@@ -1,9 +1,20 @@
 /**
- * The hook that drives a complete run.
+ * The hook that drives a complete run, including escalation.
  *
- * quote -> sign -> verify -> settle, with the settle gate enforced here as well
- * as on the orchestrator. Two independent checks of the same rule is deliberate:
- * this one keeps the UI honest, and the server one keeps the money honest.
+ * quote -> sign -> verify -> [escalate -> sign -> verify]* -> settle
+ *
+ * The loop is the new part. When the agent decides a cheap answer is too
+ * uncertain, the orchestrator rebuilds the group at a higher tier and returns
+ * it for a fresh signature. The user approves the extra spend, the group is
+ * verified again, and the cycle repeats until every check confirms or the
+ * budget runs out.
+ *
+ * WHY THE USER SIGNS AGAIN
+ * ------------------------
+ * Changing a tier changes an amount, which changes the group. Pre-authorising
+ * a maximum would let the agent spend money the user never specifically
+ * approved, which is the model this project argues against. Asking again is
+ * both more honest and more legible: the judge watches consent being given.
  *
  * SLOT 0 IS NEVER SIGNED HERE
  * ---------------------------
@@ -17,15 +28,23 @@ import { useWallet } from '@txnlab/use-wallet-react';
 import { useRunStore } from '../store/useRunStore.js';
 import { createDevSigner, createWalletSigner, devSignerMnemonic } from '../lib/signer.js';
 import type { Signer } from '../lib/signer.js';
-import { ApiError, isAbort, requestQuote, requestSettle, requestVerify } from '../lib/api.js';
-import type { SourcingRequest } from '../lib/api.js';
+import { ApiError } from '../lib/api.js';
+import { isAbort, needsSignature } from '../lib/api.js';
+import { requestQuote, requestSettle, requestVerify } from '../lib/api.js';
+import type { SignatureRequest, SourcingRequest } from '../lib/api.js';
 
 /** Slots the buyer signs. Slot 0 belongs to the facilitator. */
 const BUYER_SLOTS = [1, 2, 3, 4];
 
+/** Ceiling on escalation rounds, mirroring the orchestrator's own limit. */
+const MAX_ROUNDS = 4;
+
+/** How long to hold the settling phase, so the binding animation lands. */
+const MINIMUM_SETTLE_MS = 3_200;
+
 /** What the hook exposes to components. */
 export interface SourcingRun {
-  /** Starts a run. Handles every phase through to settlement or abort. */
+  /** Starts a run and drives it to settlement or abort. */
   start: (request: SourcingRequest) => Promise<void>;
   /** Clears state so another run can begin. */
   reset: () => void;
@@ -42,7 +61,6 @@ export interface SourcingRun {
  */
 export function useSourcingRun(): SourcingRun {
   const { activeAddress, activeWallet, signTransactions } = useWallet();
-
   const store = useRunStore();
 
   /**
@@ -72,12 +90,6 @@ export function useSourcingRun(): SourcingRun {
     return null;
   }, [activeAddress, activeWallet, signTransactions]);
 
-  /**
-   * The buyer's address.
-   *
-   * With a wallet it is the connected account. With the dev signer we cannot
-   * read it from the wallet, so the caller supplies it via the form.
-   */
   const buyerAddress = activeAddress;
 
   const start = useCallback(
@@ -94,118 +106,116 @@ export function useSourcingRun(): SourcingRun {
 
       store.beginQuote(request);
 
-      // ---- 1. Quote ----
-      let quote;
+      // ---- 1. Quote. Opens at the cheapest tier. ----
+      let pending: SignatureRequest;
+
       try {
-        quote = await requestQuote(request, buyerAddress);
+        pending = await requestQuote(request, buyerAddress);
       } catch (cause) {
         const error = cause as ApiError;
         store.fail(error.message, error.detail);
         return;
       }
 
-      store.applyQuote(quote);
+      store.applySignatureRequest(pending);
 
-      // ---- 2. Sign ----
-      //
-      // A brief pause so the user sees the totals before their wallet opens.
-      // Without it the signing prompt appears before they have read what they
-      // are approving, which is a bad pattern in a payments interface.
-      await new Promise((resolve) => setTimeout(resolve, 600));
+      // ---- 2. The escalation loop ----
+      for (let round = 1; round <= MAX_ROUNDS; round += 1) {
+        // A pause so the user reads the totals before their wallet opens.
+        // Without it the prompt arrives before they have seen what they are
+        // approving, which is a bad pattern in a payments interface.
+        await new Promise((resolve) => setTimeout(resolve, round === 1 ? 600 : 1_100));
 
-      store.beginSigning();
+        store.beginSigning();
 
-      let signedGroup: string[];
-      try {
-        signedGroup = await signer.sign(quote.unsignedGroup, BUYER_SLOTS);
-      } catch (cause) {
-        const message =
-          cause instanceof Error ? cause.message : 'Signing was cancelled';
+        let signedGroup: string[];
 
-        // A user declining is not an error worth alarming them about.
-        const declined =
-          message.toLowerCase().includes('reject') ||
-          message.toLowerCase().includes('cancel') ||
-          message.toLowerCase().includes('denied');
+        try {
+          signedGroup = await signer.sign(pending.unsignedGroup, BUYER_SLOTS);
+        } catch (cause) {
+          const message =
+            cause instanceof Error ? cause.message : 'Signing was cancelled';
 
-        store.fail(
-          declined ? 'Signing cancelled' : 'Could not sign the payment group',
-          declined ? 'Nothing was sent. You can try again.' : message,
-        );
-        return;
-      }
+          const declined =
+            message.toLowerCase().includes('reject') ||
+            message.toLowerCase().includes('cancel') ||
+            message.toLowerCase().includes('denied');
 
-      store.applySignature(signedGroup);
-
-      // ---- 3. Verify ----
-      store.beginVerify();
-
-      let verified;
-      try {
-        verified = await requestVerify(quote.runId, signedGroup);
-      } catch (cause) {
-        const error = cause as ApiError;
-        store.fail(error.message, error.detail);
-        return;
-      }
-
-      // ---- 4a. Abort. Nothing was submitted. ----
-      if (isAbort(verified)) {
-        // Hold briefly so the shatter animation is visible.
-        await new Promise((resolve) => setTimeout(resolve, 1_600));
-        store.applyAbort(verified);
-        return;
-      }
-
-      store.applyVerdicts(verified.verdicts);
-
-      // ---- The gate ----
-      //
-      // Re-checked here even though the orchestrator already enforced it. If
-      // this ever disagrees with the server we want the UI to refuse, not to
-      // optimistically request a settlement the server will reject.
-      const everyCheckPassed =
-        verified.verdicts.length === 3 &&
-        verified.verdicts.every((verdict) => verdict.passed);
-
-      if (!everyCheckPassed) {
-        store.applyAbort({
-          runId: quote.runId,
-          failedChecks: verified.verdicts
-            .filter((verdict) => !verdict.passed)
-            .map((verdict) => verdict.checkId),
-          verdicts: verified.verdicts,
-          nothingSettled: true,
-          reason: 'Not every check passed',
-        });
-        return;
-      }
-
-      // ---- 4b. Settle ----
-      store.beginSettle();
-
-      // The binding animation runs for roughly three seconds. Settlement often
-      // completes faster than that, which would cut the animation off mid-slam.
-      // We hold the settling phase for a minimum duration so the moment lands.
-      //
-      // This delays the UI, never the chain. The transaction is submitted the
-      // instant the request goes out.
-      const settleStartedAt = Date.now();
-      const MINIMUM_SETTLE_MS = 3_200;
-
-      try {
-        const settled = await requestSettle(quote.runId);
-
-        const remaining = MINIMUM_SETTLE_MS - (Date.now() - settleStartedAt);
-        if (remaining > 0) {
-          await new Promise((resolve) => setTimeout(resolve, remaining));
+          store.fail(
+            declined ? 'Signing cancelled' : 'Could not sign the payment group',
+            declined ? 'Nothing was sent. You can try again.' : message,
+          );
+          return;
         }
 
-        store.applySettlement(settled);
-      } catch (cause) {
-        const error = cause as ApiError;
-        store.fail(error.message, error.detail);
+        store.applySignature(signedGroup);
+        store.beginVerify();
+
+        let outcome;
+
+        try {
+          outcome = await requestVerify(pending.runId, signedGroup);
+        } catch (cause) {
+          const error = cause as ApiError;
+          store.fail(error.message, error.detail);
+          return;
+        }
+
+        // ---- 2a. Aborted. Nothing was submitted. ----
+        if (isAbort(outcome)) {
+          // Hold briefly so the shatter animation is visible.
+          await new Promise((resolve) => setTimeout(resolve, 1_600));
+          store.applyAbort(outcome);
+          return;
+        }
+
+        // ---- 2b. The agent escalated. Sign again. ----
+        if (needsSignature(outcome)) {
+          store.beginEscalation();
+
+          // Hold on the escalation state so the user can read the agent's
+          // reasoning before the wallet prompt arrives. The rationale is the
+          // most interesting thing on screen and it must not flash past.
+          await new Promise((resolve) => setTimeout(resolve, 2_200));
+
+          pending = outcome;
+          store.applySignatureRequest(outcome);
+          continue;
+        }
+
+        // ---- 2c. Every check confirmed. Settle. ----
+        store.applyVerdicts(outcome.verdicts, outcome.ledger);
+        store.beginSettle();
+
+        // Settlement often completes faster than the binding animation, which
+        // would cut it off mid-slam. We hold the phase for a minimum duration
+        // so the moment lands. This delays the UI, never the chain: the
+        // transaction is submitted the instant the request goes out.
+        const settleStartedAt = Date.now();
+
+        try {
+          const settled = await requestSettle(pending.runId);
+
+          const remaining = MINIMUM_SETTLE_MS - (Date.now() - settleStartedAt);
+          if (remaining > 0) {
+            await new Promise((resolve) => setTimeout(resolve, remaining));
+          }
+
+          store.applySettlement(settled);
+        } catch (cause) {
+          const error = cause as ApiError;
+          store.fail(error.message, error.detail);
+        }
+
+        return;
       }
+
+      // Loop exhausted without resolution. The orchestrator caps rounds too,
+      // so reaching here means something is wrong rather than merely uncertain.
+      store.fail(
+        'Escalation limit reached',
+        'The agent could not resolve every check within ' + String(MAX_ROUNDS) + ' rounds.',
+      );
     },
     [signer, buyerAddress, store],
   );

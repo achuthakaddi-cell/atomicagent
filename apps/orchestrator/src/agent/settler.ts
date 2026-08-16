@@ -36,6 +36,8 @@ import { PAYMENT_INDEX_BY_CHECK } from '@atomicagent/shared';
 import { X402_VERSION } from '@atomicagent/shared';
 import { TIMEOUTS_MS } from '@atomicagent/shared';
 import { explorerTxUrl } from '@atomicagent/shared';
+import { TIER_SPECS } from '@atomicagent/shared';
+import type { CheckId, Tier } from '@atomicagent/shared';
 import type { CheckQuote } from '@atomicagent/shared';
 import type { Caip2Network } from '@atomicagent/shared';
 import type { PaymentPayload } from '@atomicagent/shared';
@@ -50,8 +52,17 @@ export interface SettleInput {
   runId: string;
   /** The signed group, base64, in slot order. */
   signedGroup: string[];
-  /** Quotes collected earlier. The price quote becomes the reference payment. */
-  quotes: CheckQuote[];
+/** Quotes collected earlier. The price quote becomes the reference payment. */
+quotes: CheckQuote[];
+
+/**
+ * Which tier each check was finally paid at.
+ *
+ * The reference payment must declare the amount actually present in the
+ * transaction. After an escalation that is the escalated tier's fee, not the
+ * shallow fee the original quote carried.
+ */
+tiers: Record<CheckId, Tier>;
   /** Base64 group id, logged so the explorer link can be cross-checked. */
   groupId: string;
 }
@@ -93,7 +104,10 @@ function buildSettlementPayload(input: SettleInput): {
     scheme: 'exact',
     network: env.network as Caip2Network,
     asset: priceQuote.asset,
-    amount: priceQuote.feeAtomic,
+    // The escalated tier's fee, matching what rebuildGroup put in slot 1.
+        // Reading it from the original quote would declare the shallow amount
+        // and the facilitator would reject the group.
+        amount: TIER_SPECS[input.tiers.price].feeAtomic,
     payTo: priceQuote.payTo,
     maxTimeoutSeconds: priceQuote.maxTimeoutSeconds,
     extra: {

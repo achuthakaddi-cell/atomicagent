@@ -2,25 +2,34 @@
  * The run state machine.
  *
  * A run moves through fixed phases and cannot skip or repeat one. The most
- * damaging bug this application could ship is settling a run whose checks
- * failed, or settling twice. Loose booleans make that a one-line mistake; an
- * explicit machine makes it structurally impossible.
+ * damaging bug this application could ship is settling a run whose checks did
+ * not confirm, or settling twice. An explicit machine makes both structurally
+ * impossible.
  *
- *   idle -> quoting -> awaiting_signature -> verifying -> settling -> settled
- *                                                      \-> aborted
+ *   idle -> quoting -> awaiting_signature -> signing -> verifying -> settling
+ *                            ^                              |
+ *                            +------ escalation ------------+
  *
- * The store holds UI state only. The orchestrator holds the authoritative run,
+ * The escalation loop is the new part. When the agent decides a cheap answer is
+ * too uncertain, the group is rebuilt at a higher tier and the run returns to
+ * awaiting_signature for fresh approval.
+ *
+ * The store holds UI state only. The orchestrator holds the authoritative run
  * and re-checks the settle gate independently of anything this store believes.
  */
 
 import { create } from 'zustand';
 import type {
   AbortResult,
+  AssetInfo,
+  CheckId,
   CheckQuote,
-  CheckVerdict,
-  QuoteResult,
   SettleResult,
+  SignatureRequest,
   SourcingRequest,
+  SpendLedger,
+  Tier,
+  TieredVerdict,
 } from '../lib/api.js';
 
 /** Every phase a run can be in. */
@@ -30,21 +39,37 @@ export type RunPhase =
   | 'awaiting_signature'
   | 'signing'
   | 'verifying'
+  | 'escalating'
   | 'settling'
   | 'settled'
   | 'aborted'
   | 'error';
 
-/** Per-check display state, driven by the phase and any verdict received. */
+/** Per-check display state, derived from the phase and any verdict received. */
 export type CheckStatus =
   | 'idle'
   | 'quoted'
   | 'verifying'
-  | 'passed'
-  | 'failed';
+  | 'confirmed'
+  | 'ambiguous'
+  | 'refuted';
 
 /** The three checks in fixed order. Order defines the group slots. */
-export const CHECK_IDS = ['price', 'availability', 'verification'] as const;
+export const CHECK_IDS: readonly CheckId[] = ['price', 'availability', 'verification'];
+
+/** An empty ledger, used before a run starts. */
+const EMPTY_LEDGER: SpendLedger = {
+  policy: {
+    budgetAtomic: '500000',
+    escalateBelow: 0.85,
+    maxPerCheckFraction: 0.5,
+    reserveFraction: 0.2,
+  },
+  decisions: [],
+  spentAtomic: '0',
+  remainingAtomic: '500000',
+  rounds: 0,
+};
 
 /** Everything the UI needs to render a run. */
 interface RunState {
@@ -53,17 +78,24 @@ interface RunState {
   runId: string | null;
   request: SourcingRequest | null;
 
+  /** Which escalation round we are on. 1 is the opening round. */
+  round: number;
+
   quotes: CheckQuote[];
+  tiers: Record<CheckId, Tier>;
   unsignedGroup: string[];
   signedGroup: string[];
 
   totalFeesAtomic: string;
   orderTotalAtomic: string;
   grandTotalAtomic: string;
-  asset: { id: string; decimals: number; symbol: string } | null;
+  asset: AssetInfo | null;
 
-  verdicts: CheckVerdict[];
+  verdicts: TieredVerdict[];
   failedChecks: string[];
+
+  /** The agent's spend audit trail. */
+  ledger: SpendLedger;
 
   txId: string | null;
   explorerUrl: string | null;
@@ -75,11 +107,12 @@ interface RunState {
 
   // ---- transitions ----
   beginQuote: (request: SourcingRequest) => void;
-  applyQuote: (result: QuoteResult) => void;
+  applySignatureRequest: (result: SignatureRequest) => void;
   beginSigning: () => void;
   applySignature: (signedGroup: string[]) => void;
   beginVerify: () => void;
-  applyVerdicts: (verdicts: CheckVerdict[]) => void;
+  beginEscalation: () => void;
+  applyVerdicts: (verdicts: TieredVerdict[], ledger: SpendLedger) => void;
   applyAbort: (result: AbortResult) => void;
   beginSettle: () => void;
   applySettlement: (result: SettleResult) => void;
@@ -92,15 +125,22 @@ const initial = {
   phase: 'idle' as RunPhase,
   runId: null,
   request: null,
+  round: 0,
   quotes: [] as CheckQuote[],
+  tiers: {
+    price: 'shallow' as Tier,
+    availability: 'shallow' as Tier,
+    verification: 'shallow' as Tier,
+  },
   unsignedGroup: [] as string[],
   signedGroup: [] as string[],
   totalFeesAtomic: '0',
   orderTotalAtomic: '0',
   grandTotalAtomic: '0',
   asset: null,
-  verdicts: [] as CheckVerdict[],
+  verdicts: [] as TieredVerdict[],
   failedChecks: [] as string[],
+  ledger: EMPTY_LEDGER,
   txId: null,
   explorerUrl: null,
   totalPaidAtomic: null,
@@ -112,19 +152,24 @@ const initial = {
 export const useRunStore = create<RunState>((set) => ({
   ...initial,
 
-  beginQuote: (request) =>
-    set({ ...initial, phase: 'quoting', request }),
+  beginQuote: (request) => set({ ...initial, phase: 'quoting', request }),
 
-  applyQuote: (result) =>
+  applySignatureRequest: (result) =>
     set({
       phase: 'awaiting_signature',
       runId: result.runId,
+      round: result.round,
       quotes: result.quotes,
+      tiers: result.tiers,
       unsignedGroup: result.unsignedGroup,
       totalFeesAtomic: result.totalFeesAtomic,
       orderTotalAtomic: result.orderTotalAtomic,
       grandTotalAtomic: result.grandTotalAtomic,
       asset: result.asset,
+      ledger: result.ledger,
+      // Verdicts from the previous round are kept, so the UI can show what
+      // prompted the escalation while asking for the next signature.
+      verdicts: result.verdicts,
     }),
 
   beginSigning: () => set({ phase: 'signing' }),
@@ -133,7 +178,9 @@ export const useRunStore = create<RunState>((set) => ({
 
   beginVerify: () => set({ phase: 'verifying' }),
 
-  applyVerdicts: (verdicts) => set({ verdicts }),
+  beginEscalation: () => set({ phase: 'escalating' }),
+
+  applyVerdicts: (verdicts, ledger) => set({ verdicts, ledger }),
 
   applyAbort: (result) =>
     set({
@@ -141,6 +188,7 @@ export const useRunStore = create<RunState>((set) => ({
       verdicts: result.verdicts,
       failedChecks: result.failedChecks,
       abortReason: result.reason,
+      ledger: result.ledger,
       // The signed group is discarded. It was never broadcast and never will
       // be; holding signatures with no purpose is careless.
       signedGroup: [],
@@ -154,7 +202,9 @@ export const useRunStore = create<RunState>((set) => ({
       txId: result.txId,
       explorerUrl: result.explorerUrl,
       verdicts: result.verdicts,
+      tiers: result.tiers,
       totalPaidAtomic: result.totalPaidAtomic,
+      ledger: result.ledger,
       signedGroup: [],
     }),
 
@@ -182,11 +232,11 @@ export const useRunStore = create<RunState>((set) => ({
 export function checkStatus(
   phase: RunPhase,
   checkId: string,
-  verdicts: CheckVerdict[],
+  verdicts: TieredVerdict[],
 ): CheckStatus {
   const verdict = verdicts.find((entry) => entry.checkId === checkId);
 
-  if (verdict) return verdict.passed ? 'passed' : 'failed';
+  if (verdict) return verdict.confidence;
   if (phase === 'verifying') return 'verifying';
   if (phase === 'idle' || phase === 'quoting') return 'idle';
 
@@ -214,6 +264,7 @@ export function isBusy(phase: RunPhase): boolean {
     phase === 'quoting' ||
     phase === 'signing' ||
     phase === 'verifying' ||
+    phase === 'escalating' ||
     phase === 'settling'
   );
 }

@@ -58,11 +58,16 @@ const CATALOGUE: readonly CatalogueEntry[] = [
   {
     sku: 'SKU-4471',
     description: 'Cold-rolled steel sheet, 1.2mm, 1250x2500',
-    unitPriceAtomic: '4500000',
+    // Cached figure sits close to a typical ceiling and the snapshot is old,
+    // so a shallow read cannot honestly confirm it. This is the case that
+    // makes escalation worth demonstrating.
+    unitPriceAtomic: '4800000',
     supplierId: 'SUP-BLR-011',
-    cachedAt: '2026-08-15T04:00:00Z',
-    cacheAgeHours: 2,
-    livePriceAtomic: '4500000',
+    cachedAt: '2026-08-14T20:00:00Z',
+    cacheAgeHours: 11,
+    // Live price has drifted down since the snapshot, so escalating confirms
+    // the order rather than killing it.
+    livePriceAtomic: '4650000',
     volumeDiscountAtomic: null,
   },
   {
@@ -102,11 +107,16 @@ const CATALOGUE: readonly CatalogueEntry[] = [
   {
     sku: 'SKU-4471',
     description: 'Cold-rolled steel sheet, 1.2mm, 1250x2500',
-    unitPriceAtomic: '4320000',
-    supplierId: 'SUP-CHN-330',
-    cachedAt: '2026-08-15T04:30:00Z',
-    cacheAgeHours: 2,
-    livePriceAtomic: '4320000',
+    // Cached figure sits close to a typical ceiling and the snapshot is old,
+    // so a shallow read cannot honestly confirm it. This is the case that
+    // makes escalation worth demonstrating.
+    unitPriceAtomic: '4800000',
+    supplierId: 'SUP-BLR-011',
+    cachedAt: '2026-08-14T20:00:00Z',
+    cacheAgeHours: 11,
+    // Live price has drifted down since the snapshot, so escalating confirms
+    // the order rather than killing it.
+    livePriceAtomic: '4650000',
     volumeDiscountAtomic: null,
   },
   {

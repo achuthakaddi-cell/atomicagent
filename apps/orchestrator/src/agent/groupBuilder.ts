@@ -62,6 +62,17 @@ export interface BuildGroupInput {
   orderTotalAtomic: string;
   /** Human-readable run reference, written into the transaction notes. */
   runId: string;
+  /**
+   * What each check is owed, in atomic units.
+   *
+   * This is CUMULATIVE across escalation rounds. A check that ran shallow and
+   * was then escalated to standard is owed both fees, because the service did
+   * both pieces of work. Paying only the final tier would mean taking the
+   * shallow answer for free.
+   *
+   * When absent, the quote's own fee is used — the single-round case.
+   */
+  cumulativeFees?: Partial<Record<'price' | 'availability' | 'verification', string>>;
 }
 
 /** The assembled, unsigned group. */
@@ -168,10 +179,17 @@ export async function buildAtomicGroup(
   const availabilityQuote = requireQuote(input.quotes, 'availability');
   const verificationQuote = requireQuote(input.quotes, 'verification');
 
+  // Cumulative fees when escalation has occurred, otherwise the quoted fee.
+  const priceFee = input.cumulativeFees?.price ?? priceQuote.feeAtomic;
+  const availabilityFee =
+    input.cumulativeFees?.availability ?? availabilityQuote.feeAtomic;
+  const verificationFee =
+    input.cumulativeFees?.verification ?? verificationQuote.feeAtomic;
+
   const totalFeesAtomic = sumAtomicAmounts([
-    priceQuote.feeAtomic,
-    availabilityQuote.feeAtomic,
-    verificationQuote.feeAtomic,
+    priceFee,
+    availabilityFee,
+    verificationFee,
   ]);
 
   const grandTotalAtomic = sumAtomicAmounts([
@@ -240,7 +258,7 @@ export async function buildAtomicGroup(
   const priceTxn = buildAssetTransfer({
     sender: input.buyerAddress,
     receiver: priceQuote.payTo,
-    amountAtomic: priceQuote.feeAtomic,
+    amountAtomic: priceFee,
     assetId: priceQuote.asset,
     params: zeroFeeParams,
     note: buildNote(input.runId, 'price'),
@@ -249,7 +267,7 @@ export async function buildAtomicGroup(
   const availabilityTxn = buildAssetTransfer({
     sender: input.buyerAddress,
     receiver: availabilityQuote.payTo,
-    amountAtomic: availabilityQuote.feeAtomic,
+    amountAtomic: availabilityFee,
     assetId: availabilityQuote.asset,
     params: zeroFeeParams,
     note: buildNote(input.runId, 'availability'),
@@ -258,7 +276,7 @@ export async function buildAtomicGroup(
   const verificationTxn = buildAssetTransfer({
     sender: input.buyerAddress,
     receiver: verificationQuote.payTo,
-    amountAtomic: verificationQuote.feeAtomic,
+    amountAtomic: verificationFee,
     assetId: verificationQuote.asset,
     params: zeroFeeParams,
     note: buildNote(input.runId, 'verification'),
