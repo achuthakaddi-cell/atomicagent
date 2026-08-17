@@ -69,7 +69,6 @@ if (!parsed.success) {
 const raw = parsed.data;
 
 export const env = {
-  PORT: z.coerce.number().int().positive().optional(),
   port: raw.PORT ?? raw.PORT_SERVICE_VERIFICATION,
   network: raw.X402_NETWORK,
   facilitatorUrl: raw.FACILITATOR_URL,
