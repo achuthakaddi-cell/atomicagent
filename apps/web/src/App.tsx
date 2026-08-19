@@ -221,15 +221,10 @@ export default function App() {
                 <PhaseHeading phase={store.phase} round={store.round} />
 
                 <div className="mt-3 w-full">
-                  <TheBinding
+                <TheBinding
                     phase={store.phase === 'escalating' ? 'verifying' : store.phase}
                     groupId={null}
-                    verdicts={store.verdicts.map((v) => ({
-                      checkId: v.checkId,
-                      passed: v.confidence === 'confirmed',
-                      reason: v.reason,
-                      detailHash: v.detailHash,
-                    }))}
+                    verdicts={store.verdicts}
                     failedChecks={store.failedChecks}
                   />
                 </div>
