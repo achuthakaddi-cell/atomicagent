@@ -27,13 +27,13 @@
 
 import { useEffect, useRef } from 'react';
 import { useReducedMotion } from 'motion/react';
-import type { CheckVerdict } from '../../lib/api.js';
+import type { TieredVerdict } from '../../lib/api.js';
 import type { RunPhase } from '../../store/useRunStore.js';
 
 interface TheBindingProps {
   phase: RunPhase;
   groupId: string | null;
-  verdicts: CheckVerdict[];
+  verdicts: TieredVerdict[];
   failedChecks: string[];
 }
 
