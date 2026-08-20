@@ -3,11 +3,26 @@
  *
  * THE LAYOUT
  * ----------
- *   index 0   pay     feePayer -> feePayer     UNSIGNED, facilitator signs
- *   index 1   axfer   buyer    -> price svc    check fee
- *   index 2   axfer   buyer    -> availability check fee
- *   index 3   axfer   buyer    -> verification check fee
- *   index 4   axfer   buyer    -> supplier     THE ORDER PAYMENT
+ *   index 0        pay     feePayer -> feePayer     UNSIGNED, facilitator signs
+ *   index 1        axfer   buyer    -> price svc    check fee
+ *   index 2        axfer   buyer    -> availability check fee
+ *   index 3        axfer   buyer    -> verification check fee
+ *   index 4..n-2   axfer   buyer    -> external     registered at runtime
+ *   index n-1      axfer   buyer    -> supplier     THE ORDER PAYMENT
+ *
+ * The order payment is ALWAYS LAST. That is not cosmetic: an external service
+ * registered at runtime has to be given a slot, and taking one from the middle
+ * would renumber the order payment on every registration. Anchoring it at the
+ * end means external services occupy the space between the built-in checks and
+ * the order, and nothing that already exists has to move.
+ *
+ * WHY EXTERNAL SERVICES CAN JOIN AT ALL
+ * -------------------------------------
+ * The AVM exact scheme defines its payload as
+ * `{ paymentGroup: string[]; paymentIndex: number }`. Each service verifies the
+ * transaction at ITS index against ITS own requirements and has no opinion
+ * about the rest of the group. Nothing in that mechanism is specific to
+ * services we wrote — which is the claim this feature exists to demonstrate.
  *
  * WHY SLOT 0 IS UNSIGNED
  * ----------------------
@@ -17,29 +32,23 @@
  * endpoint returns extra.feePayer for Algorand and Solana, but NOT for the EVM
  * networks it also serves. Fee abstraction of this kind is not available there.
  *
- * WHY SLOT 4 EXISTS
- * -----------------
- * Without it, an atomic group of three API fees is a modest convenience. With
- * it, the order payment is bound by the same group id as the verification it
- * depends on. Money and proof become one indivisible event, which is precisely
- * the gap the x402 research literature identifies.
- *
- * WHY THE FEE TRANSACTIONS CARRY ZERO FEE
- * ---------------------------------------
+ * WHY SLOT 0 CARRIES THE WHOLE FEE
+ * --------------------------------
  * In an Algorand group the total fee must cover every transaction, but any one
- * transaction may pay more than its share. Slot 0 pays the whole amount and the
- * other four pay nothing, so the buyer's signature never authorises an ALGO
- * spend of any kind.
+ * transaction may pay more than its share. Slot 0 pays the lot and every other
+ * slot pays nothing, so the buyer's signature never authorises an ALGO spend of
+ * any kind. The total scales with group size, so registering a service raises
+ * what slot 0 pays and leaves the buyer's cost at zero.
  */
 
 import algosdk from 'algosdk';
 import { AppError } from '@atomicagent/shared';
 import { ERROR_CODE } from '@atomicagent/shared';
 import { GROUP_SLOT } from '@atomicagent/shared';
-import { ATOMIC_GROUP_SIZE } from '@atomicagent/shared';
 import { MIN_TXN_FEE } from '@atomicagent/shared';
+import { MAX_GROUP_SIZE } from '@atomicagent/shared';
 import { sumAtomicAmounts } from '@atomicagent/shared';
-import type { CheckQuote } from '@atomicagent/shared';
+import type { CheckQuote, DiscoveredService } from '@atomicagent/shared';
 import { env } from '../config/env.js';
 import { logger } from '../config/logger.js';
 import { getSuggestedParams } from '../clients/algodClient.js';
@@ -52,37 +61,43 @@ import type { NormalisedParams } from '../clients/algodClient.js';
 
 /** What the caller must supply to build a group. */
 export interface BuildGroupInput {
-  /** Wallet that will sign slots 1 to 4. */
+  /** Wallet that will sign every slot except 0. */
   buyerAddress: string;
   /** Facilitator address that will sign slot 0. */
   feePayer: string;
-  /** Quotes harvested from the three 402 challenges. */
+  /** Quotes harvested from the three built-in 402 challenges. */
   quotes: CheckQuote[];
-  /** Order payment for slot 4, in atomic units. */
+  /** Order payment for the final slot, in atomic units. */
   orderTotalAtomic: string;
   /** Human-readable run reference, written into the transaction notes. */
   runId: string;
   /**
-   * What each check is owed, in atomic units.
+   * What each built-in check is owed this round, in atomic units.
    *
-   * This is CUMULATIVE across escalation rounds. A check that ran shallow and
-   * was then escalated to standard is owed both fees, because the service did
-   * both pieces of work. Paying only the final tier would mean taking the
-   * shallow answer for free.
-   *
-   * When absent, the quote's own fee is used — the single-round case.
+   * Exactly the current tier's fee, never a running total. A service identifies
+   * which tier a client paid for by matching the amount against its price list,
+   * and a cumulative figure matches no tier and is rejected outright.
    */
   cumulativeFees?: Partial<Record<'price' | 'availability' | 'verification', string>>;
+  /**
+   * Services registered at runtime from their own 402 challenges.
+   *
+   * Each occupies one slot between the built-in checks and the order payment.
+   * The orchestrator has no compile-time knowledge of any of them.
+   */
+  externalServices?: DiscoveredService[];
 }
 
 /** The assembled, unsigned group. */
 export interface BuiltGroup {
   /** Base64 msgpack transactions, in slot order. */
   unsignedGroup: string[];
-  /** Base64 group id shared by all five transactions. */
+  /** Base64 group id shared by every transaction. */
   groupId: string;
-  /** Sum of the three check fees, atomic units. */
+  /** Sum of the three built-in check fees, atomic units. */
   totalFeesAtomic: string;
+  /** Sum of the external service fees, atomic units. */
+  externalFeesAtomic: string;
   /** Order payment, atomic units. */
   orderTotalAtomic: string;
   /** Everything the buyer's signature authorises, atomic units. */
@@ -91,16 +106,13 @@ export interface BuiltGroup {
   buyerNetworkFeeMicroAlgos: string;
   /** Round after which the signed group can no longer be submitted. */
   lastValidRound: string;
+  /** How many transactions the group actually contains. */
+  groupSize: number;
+  /** Which slot the order payment ended up in. */
+  orderSlot: number;
+  /** Slot assignments for the external services, so the UI can label them. */
+  externalSlots: Array<{ id: string; url: string; slot: number; feeAtomic: string }>;
 }
-
-/**
- * Total network fee for the group, paid entirely by slot 0.
- *
- * Five transactions at the minimum fee each. Slot 0 pays this whole amount and
- * the other four are set to zero, which is legal in Algorand as long as the
- * group total is covered.
- */
-const GROUP_TOTAL_FEE = BigInt(MIN_TXN_FEE) * BigInt(ATOMIC_GROUP_SIZE);
 
 /**
  * Finds one quote by check id.
@@ -127,8 +139,7 @@ function requireQuote(quotes: CheckQuote[], checkId: string): CheckQuote {
  * Builds a short note for a transaction.
  *
  * Notes are visible on the block explorer, so a judge inspecting the settled
- * group can read what each slot was for rather than seeing five anonymous
- * transfers.
+ * group can read what each slot was for rather than seeing anonymous transfers.
  *
  * @param runId - the run this transaction belongs to
  * @param label - what this slot is for
@@ -162,13 +173,13 @@ function paramsWithFee(params: NormalisedParams, fee: bigint): NormalisedParams 
 }
 
 /**
- * Builds the five-transaction atomic group.
+ * Builds the atomic group.
  *
- * Every transaction is unsigned when it leaves this function. Slots 1 to 4 go
- * to the browser for the wallet to sign; slot 0 is signed by the facilitator at
- * settlement. This service never holds a key and never signs anything.
+ * Every transaction is unsigned when it leaves this function. Slot 0 is signed
+ * by the facilitator at settlement; everything else goes to the browser for the
+ * wallet. This service never holds a key and never signs anything.
  *
- * @param input - buyer, fee payer, quotes and order total
+ * @param input - buyer, fee payer, quotes, order total and any external services
  * @returns the encoded group, its group id, and the amounts involved
  * @throws AppError if the buyer cannot pay or the group fails validation
  */
@@ -179,7 +190,30 @@ export async function buildAtomicGroup(
   const availabilityQuote = requireQuote(input.quotes, 'availability');
   const verificationQuote = requireQuote(input.quotes, 'verification');
 
-  // Cumulative fees when escalation has occurred, otherwise the quoted fee.
+  const external = input.externalServices ?? [];
+
+  // ---- Group size, computed rather than assumed ----
+  //
+  // Four built-in slots, one per external service, and the order payment last.
+  const groupSize = 4 + external.length + 1;
+  const orderSlot = groupSize - 1;
+
+  if (groupSize > MAX_GROUP_SIZE) {
+    throw new AppError(
+      ERROR_CODE.GROUP_MALFORMED,
+      'Too many services for one atomic group',
+      {
+        detail:
+          'Algorand allows at most ' + String(MAX_GROUP_SIZE) +
+          ' transactions in a group. This run needs ' + String(groupSize) + '.',
+      },
+    );
+  }
+
+  // The fee scales with the group. Slot 0 pays all of it; the buyer pays none.
+  const groupTotalFee = BigInt(MIN_TXN_FEE) * BigInt(groupSize);
+
+  // Exactly the current tier's fee per built-in check.
   const priceFee = input.cumulativeFees?.price ?? priceQuote.feeAtomic;
   const availabilityFee =
     input.cumulativeFees?.availability ?? availabilityQuote.feeAtomic;
@@ -192,8 +226,14 @@ export async function buildAtomicGroup(
     verificationFee,
   ]);
 
+  const externalFeesAtomic =
+    external.length > 0
+      ? sumAtomicAmounts(external.map((service) => service.chosen.amount))
+      : '0';
+
   const grandTotalAtomic = sumAtomicAmounts([
     totalFeesAtomic,
+    externalFeesAtomic,
     input.orderTotalAtomic,
   ]);
 
@@ -215,9 +255,7 @@ export async function buildAtomicGroup(
       'Your wallet has not opted into ' + env.asset.symbol,
       {
         detail:
-          'Opt into asset ' +
-          env.asset.id +
-          ' in your wallet, then try again.',
+          'Opt into asset ' + env.asset.id + ' in your wallet, then try again.',
       },
     );
   }
@@ -228,15 +266,14 @@ export async function buildAtomicGroup(
       'Not enough ' + env.asset.symbol + ' to cover this order',
       {
         detail:
-          'needs ' +
-          grandTotalAtomic +
-          ' atomic units, wallet holds ' +
+          'needs ' + grandTotalAtomic + ' atomic units, wallet holds ' +
           holding.balanceAtomic,
       },
     );
   }
 
   const params = await getSuggestedParams();
+  const zeroFeeParams = paramsWithFee(params, 0n);
 
   // ---- Slot 0: the facilitator's fee payer ----
   //
@@ -246,15 +283,11 @@ export async function buildAtomicGroup(
     sender: input.feePayer,
     receiver: input.feePayer,
     amountMicroAlgos: 0n,
-    params: paramsWithFee(params, GROUP_TOTAL_FEE),
+    params: paramsWithFee(params, groupTotalFee),
     note: buildNote(input.runId, 'fees'),
   });
 
-  // ---- Slots 1 to 3: the three check fees ----
-  //
-  // Fee set to zero on each. Slot 0 already covers the group total.
-  const zeroFeeParams = paramsWithFee(params, 0n);
-
+  // ---- Slots 1 to 3: the built-in checks ----
   const priceTxn = buildAssetTransfer({
     sender: input.buyerAddress,
     receiver: priceQuote.payTo,
@@ -282,10 +315,25 @@ export async function buildAtomicGroup(
     note: buildNote(input.runId, 'verification'),
   });
 
-  // ---- Slot 4: the order payment ----
+  // ---- Slot 4 onward: services registered at runtime ----
   //
-  // The transaction that makes the pitch true. It shares a group id with the
-  // three checks above, so it cannot commit unless they all do.
+  // Every value here — the payee, the amount, the asset — came out of that
+  // service's own 402 challenge. Nothing about it was known at compile time.
+  const externalTxns = external.map((service, index) =>
+    buildAssetTransfer({
+      sender: input.buyerAddress,
+      receiver: service.chosen.payTo,
+      amountAtomic: service.chosen.amount,
+      assetId: service.chosen.asset,
+      params: zeroFeeParams,
+      note: buildNote(input.runId, 'ext' + String(index)),
+    }),
+  );
+
+  // ---- Final slot: the order payment ----
+  //
+  // The transaction that makes the pitch true. It shares a group id with every
+  // check above, so it cannot commit unless they all do.
   const orderTxn = buildAssetTransfer({
     sender: input.buyerAddress,
     receiver: env.supplierAddress,
@@ -298,18 +346,23 @@ export async function buildAtomicGroup(
   // ---- Assemble in slot order ----
   //
   // The array index IS the payment index each service verifies against. Order
-  // here must match GROUP_SLOT exactly, or every service rejects its payment.
+  // here must match what every service was told, or verification fails.
   const txns: algosdk.Transaction[] = [];
   txns[GROUP_SLOT.FEE_PAYER] = feePayerTxn;
   txns[GROUP_SLOT.PRICE] = priceTxn;
   txns[GROUP_SLOT.AVAILABILITY] = availabilityTxn;
   txns[GROUP_SLOT.VERIFICATION] = verificationTxn;
-  txns[GROUP_SLOT.ORDER] = orderTxn;
 
-  if (txns.length !== ATOMIC_GROUP_SIZE) {
+  externalTxns.forEach((txn, index) => {
+    txns[4 + index] = txn;
+  });
+
+  txns[orderSlot] = orderTxn;
+
+  if (txns.length !== groupSize) {
     throw new AppError(
       ERROR_CODE.GROUP_MALFORMED,
-      'Built ' + String(txns.length) + ' transactions, expected ' + String(ATOMIC_GROUP_SIZE),
+      'Built ' + String(txns.length) + ' transactions, expected ' + String(groupSize),
     );
   }
 
@@ -346,27 +399,43 @@ export async function buildAtomicGroup(
   // identical bytes, so the group id survives the trip to the browser.
   const unsignedGroup = txns.map((txn) => encodeTxn(txn));
 
+  const externalSlots = external.map((service) => ({
+    id: service.id,
+    url: service.url,
+    slot: service.paymentIndex,
+    feeAtomic: service.chosen.amount,
+  }));
+
   logger.info(
     {
       runId: input.runId,
       groupId,
       size: unsignedGroup.length,
+      orderSlot,
+      externalCount: external.length,
       totalFeesAtomic,
+      externalFeesAtomic,
       orderTotalAtomic: input.orderTotalAtomic,
       grandTotalAtomic,
       lastValid: params.lastValid.toString(),
     },
-    'atomic group built, unsigned',
+    external.length > 0
+      ? 'atomic group built with externally registered services'
+      : 'atomic group built, unsigned',
   );
 
   return {
     unsignedGroup,
     groupId,
     totalFeesAtomic,
+    externalFeesAtomic,
     orderTotalAtomic: input.orderTotalAtomic,
     grandTotalAtomic,
     buyerNetworkFeeMicroAlgos: '0',
     lastValidRound: params.lastValid.toString(),
+    groupSize,
+    orderSlot,
+    externalSlots,
   };
 }
 

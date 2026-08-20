@@ -129,3 +129,20 @@ export type {
   SpendPolicy,
   SpendDecision,
 } from './types/tiers.js';
+// ---------------------------------------------------------------------------
+// pluggable services
+// ---------------------------------------------------------------------------
+export {
+  MAX_GROUP_SIZE,
+  RESERVED_SLOTS,
+  MAX_EXTERNAL_SERVICES,
+  serviceIdFromUrl,
+  chooseOption,
+} from './types/pluggable.js';
+export type {
+  ExternalServiceId,
+  DiscoveredOption,
+  DiscoveredService,
+  DiscoveryFailure,
+  DiscoveryResult,
+} from './types/pluggable.js';
