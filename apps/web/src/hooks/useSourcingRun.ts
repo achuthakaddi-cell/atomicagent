@@ -33,9 +33,6 @@ import { isAbort, needsSignature } from '../lib/api.js';
 import { requestQuote, requestSettle, requestVerify } from '../lib/api.js';
 import type { SignatureRequest, SourcingRequest } from '../lib/api.js';
 
-/** Slots the buyer signs. Slot 0 belongs to the facilitator. */
-const BUYER_SLOTS = [1, 2, 3, 4];
-
 /** Ceiling on escalation rounds, mirroring the orchestrator's own limit. */
 const MAX_ROUNDS = 4;
 
@@ -131,7 +128,15 @@ export function useSourcingRun(): SourcingRun {
         let signedGroup: string[];
 
         try {
-          signedGroup = await signer.sign(pending.unsignedGroup, BUYER_SLOTS);
+                    // Which slots to sign comes from the orchestrator, not a constant.
+          // The group grows when external services register, and a hardcoded
+          // [1,2,3,4] would leave the last slot unsigned — which fails at
+          // settlement, after the user has already approved.
+          const slotsToSign =
+            pending.buyerSlots ??
+            Array.from({ length: pending.unsignedGroup.length - 1 }, (_, i) => i + 1);
+
+          signedGroup = await signer.sign(pending.unsignedGroup, slotsToSign);
         } catch (cause) {
           const message =
             cause instanceof Error ? cause.message : 'Signing was cancelled';

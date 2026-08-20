@@ -106,7 +106,6 @@ export interface AssetInfo {
   symbol: string;
 }
 
-/** A round that needs the user's signature, whether the first or an escalation. */
 export interface SignatureRequest {
   runId: string;
   round: number;
@@ -114,15 +113,33 @@ export interface SignatureRequest {
   tiers: Record<CheckId, Tier>;
   quotes: CheckQuote[];
   totalFeesAtomic: string;
+  /** Sum of the externally registered service fees. */
+  externalFeesAtomic: string;
   orderTotalAtomic: string;
   grandTotalAtomic: string;
   asset: AssetInfo;
   unsignedGroup: string[];
+  /** How many transactions this group contains. Not always five. */
+  groupSize: number;
+  /**
+   * Which indices the wallet must sign.
+   *
+   * Every slot except 0, which the facilitator signs. Sent by the orchestrator
+   * rather than assumed, because the group grows when services register and a
+   * hardcoded list would leave the last slot unsigned.
+   */
+  buyerSlots: number[];
   groupLayout: GroupLayout;
+  /** Services registered at runtime, with the slot each occupies. */
+  externalServices: Array<{
+    id: string;
+    url: string;
+    slot: number;
+    feeAtomic: string;
+  }>;
   ledger: SpendLedger;
   verdicts: TieredVerdict[];
 }
-
 /** Every check confirmed. The run may settle. */
 export interface ReadyToSettle {
   runId: string;
@@ -330,4 +347,76 @@ export function needsSignature(
  */
 export function isAbort(outcome: VerifyOutcome): outcome is AbortResult {
   return outcome.needsSignature === false && outcome.readyToSettle === false;
+}
+/** A service the orchestrator learned about from its own 402 challenge. */
+export interface DiscoveredService {
+  id: string;
+  url: string;
+  description: string | null;
+  chosen: {
+    scheme: string;
+    network: string;
+    asset: string;
+    amount: string;
+    payTo: string;
+    maxTimeoutSeconds: number;
+  };
+  paymentIndex: number;
+  discoveredAt: number;
+}
+
+/** What comes back from probing a URL. */
+export interface DiscoveryResponse {
+  ok: boolean;
+  service: DiscoveredService | null;
+  failure: string | null;
+  message: string;
+  registered: DiscoveredService[];
+  slotsRemaining?: number;
+}
+
+/**
+ * Registers an arbitrary x402 endpoint by URL.
+ *
+ * The orchestrator probes it, reads its 402 challenge, and builds a payment
+ * slot from what it finds. Nothing about the service is known in advance.
+ *
+ * @param url - the endpoint to register
+ * @returns the result, success or a reason it cannot join
+ */
+export async function discoverService(url: string): Promise<DiscoveryResponse> {
+  return post<DiscoveryResponse>('/api/services/discover', { url }, 15_000);
+}
+
+/**
+ * Lists what is currently registered.
+ *
+ * @returns registered services and remaining group capacity
+ */
+export async function listServices(): Promise<{
+  registered: DiscoveredService[];
+  slotsUsed: number;
+  slotsRemaining: number;
+  maxExternal: number;
+}> {
+  const response = await fetch(env.orchestratorUrl + '/api/services');
+  const body = (await response.json()) as {
+    ok: boolean;
+    data: {
+      registered: DiscoveredService[];
+      slotsUsed: number;
+      slotsRemaining: number;
+      maxExternal: number;
+    };
+  };
+  return body.data;
+}
+
+/**
+ * Clears the registry. For the demo, so a presenter can start clean.
+ *
+ * @returns how many were cleared
+ */
+export async function resetServices(): Promise<{ cleared: number }> {
+  return post<{ cleared: number }>('/api/services/reset', {}, 10_000);
 }

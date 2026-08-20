@@ -24,6 +24,7 @@ import {
   ERROR_CODE,
   DEFAULT_POLICY,
   type CheckId,
+  type DiscoveredService,
   type CheckQuote,
   type RunPhase,
   type SourcingRequest,
@@ -49,16 +50,16 @@ export interface Run {
   /** Fee-payer address the facilitator will use for slot 0. */
   feePayer: string | null;
 
-  /** Unsigned group, base64 msgpack, in slot order. Built once. */
+  /** Unsigned group, base64 msgpack, in slot order. Rebuilt on each round. */
   unsignedGroup: string[];
   /** Signed group returned from the wallet. */
   signedGroup: string[] | null;
   /** Base64 group id, for cross-checking every slot. */
   groupId: string | null;
 
-  /** Order total for slot 4, atomic units. */
+  /** Order total for the final slot, atomic units. */
   orderTotalAtomic: string;
-  /** Sum of the three check fees, atomic units. */
+  /** Sum of the three built-in check fees, atomic units. */
   totalFeesAtomic: string;
 
   /** Verdicts collected during the most recent verify round. */
@@ -68,15 +69,39 @@ export interface Run {
   tiers: Record<CheckId, Tier>;
 
   /**
-   * Cumulative fee owed to each check across every round.
+   * What each built-in check is owed this round, in atomic units.
    *
-   * A check escalated from shallow to standard is owed both fees, because the
-   * service did both pieces of work.
+   * Exactly the current tier's fee, never a running total. A service identifies
+   * which tier a client paid for by matching the amount against its price list,
+   * and a cumulative figure matches no tier and is rejected outright.
    */
   cumulativeFees: Record<CheckId, string>;
 
   /** The spend audit trail: every decision, with its rationale. */
   ledger: SpendLedger;
+
+  /**
+   * Services registered at runtime from their own 402 challenges.
+   *
+   * Captured when the run is created, not read live, because a service
+   * registering mid-run would change the group after the user had signed it.
+   */
+  externalServices: DiscoveredService[];
+
+  /**
+   * How many transactions this run's group contains.
+   *
+   * Four built-in slots, one per external service, and the order payment last.
+   * A hardcoded size would reject any group carrying an external service.
+   */
+  groupSize: number;
+
+  /**
+   * Which slot the order payment occupies.
+   *
+   * Always last, so registering a service does not renumber it.
+   */
+  orderSlot: number;
 
   /** Transaction id, present only after a successful settle. */
   txId: string | null;
@@ -193,6 +218,10 @@ export function createRun(
       remainingAtomic: DEFAULT_POLICY.budgetAtomic,
       rounds: 0,
     },
+    externalServices: [],
+    // Four built-in slots plus the order payment. Grows when services register.
+    groupSize: 5,
+    orderSlot: 4,
     txId: null,
     abortReason: null,
     settleLocked: false,
@@ -344,6 +373,10 @@ export function failedChecks(run: Run): CheckId[] {
 /**
  * Adds a round's fees to the cumulative total for each check.
  *
+ * Retained for the audit trail. The group itself carries only the current
+ * tier's fee, because a service matches the amount it receives against its own
+ * price list and a running total matches no tier.
+ *
  * @param run - the run to update, mutated in place
  * @param fees - fee paid this round, per check
  */
@@ -360,6 +393,7 @@ export function addRoundFees(
   }
   run.updatedAt = Date.now();
 }
+
 /**
  * Current store size. Used by the health endpoint.
  *

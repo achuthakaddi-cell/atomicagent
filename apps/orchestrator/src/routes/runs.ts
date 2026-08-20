@@ -24,10 +24,11 @@
 import { Router } from 'express';
 import type { Router as ExpressRouter } from 'express';
 import { AppError } from '@atomicagent/shared';
+import { verifyExternalServices } from '../agent/verifier.js';
 import { ERROR_CODE } from '@atomicagent/shared';
 import { ok } from '@atomicagent/shared';
-import { ATOMIC_GROUP_SIZE } from '@atomicagent/shared';
 import { GROUP_SLOT } from '@atomicagent/shared';
+import { registeredServices } from './services.js';
 import { TIER_SPECS } from '@atomicagent/shared';
 import { quoteRequestSchema } from '@atomicagent/shared';
 import { verifyRequestSchema } from '@atomicagent/shared';
@@ -105,14 +106,9 @@ function payeeMap(run: Run): Record<CheckId, string> {
  * WHY THE GROUP CARRIES ONE TIER FEE, NOT A RUNNING TOTAL
  * -------------------------------------------------------
  * A service identifies which tier a client paid for by matching the amount
- * against its price list. A cumulative figure — shallow plus standard — matches
- * no tier and is rejected outright. So the group always carries exactly the
- * current tier's fee, and an escalated round replaces the earlier payment
- * rather than adding to it.
- *
- * The earlier round's group was never broadcast, so nothing was actually paid
- * for the answer that got superseded. That is a real cost the services absorb,
- * and the honest framing is that a superseded shallow answer was never bought.
+ * against its price list. A cumulative figure matches no tier and is rejected
+ * outright. So the group always carries exactly the current tier's fee, and an
+ * escalated round replaces the earlier payment rather than adding to it.
  *
  * @param run - the run to build for
  * @returns the unsigned group and its totals
@@ -137,11 +133,14 @@ async function rebuildGroup(run: Run) {
     orderTotalAtomic: run.orderTotalAtomic,
     runId: run.id,
     cumulativeFees: fees,
+    externalServices: run.externalServices,
   });
 
   run.unsignedGroup = built.unsignedGroup;
   run.groupId = built.groupId;
   run.totalFeesAtomic = built.totalFeesAtomic;
+  run.groupSize = built.groupSize;
+  run.orderSlot = built.orderSlot;
   run.signedGroup = null;
 
   return built;
@@ -149,6 +148,10 @@ async function rebuildGroup(run: Run) {
 
 /**
  * The response shape for a round that needs a signature.
+ *
+ * groupLayout is computed rather than constant, because the order payment moves
+ * when external services register. The frontend reads this to decide which
+ * indices the wallet must sign, and a stale layout would leave a slot unsigned.
  *
  * @param run - the run
  * @param built - the freshly built group
@@ -168,6 +171,7 @@ function signaturePayload(run: Run, built: Awaited<ReturnType<typeof rebuildGrou
       maxTimeoutSeconds: quote.maxTimeoutSeconds,
     })),
     totalFeesAtomic: built.totalFeesAtomic,
+    externalFeesAtomic: built.externalFeesAtomic,
     orderTotalAtomic: built.orderTotalAtomic,
     grandTotalAtomic: built.grandTotalAtomic,
     asset: {
@@ -176,13 +180,17 @@ function signaturePayload(run: Run, built: Awaited<ReturnType<typeof rebuildGrou
       symbol: env.asset.symbol,
     },
     unsignedGroup: built.unsignedGroup,
+    groupSize: built.groupSize,
+    // Every slot except 0. The facilitator signs slot 0 and covers all fees.
+    buyerSlots: Array.from({ length: built.groupSize - 1 }, (_, i) => i + 1),
     groupLayout: {
       feePayer: GROUP_SLOT.FEE_PAYER,
       price: GROUP_SLOT.PRICE,
       availability: GROUP_SLOT.AVAILABILITY,
       verification: GROUP_SLOT.VERIFICATION,
-      order: GROUP_SLOT.ORDER,
+      order: built.orderSlot,
     },
+    externalServices: built.externalSlots,
     ledger: run.ledger,
     verdicts: run.verdicts,
   };
@@ -200,7 +208,9 @@ runsRouter.post(
   asyncRoute(async (req, res) => {
     const body = quoteRequestSchema.parse(req.body);
     const run = createRun(body.request, body.buyerAddress);
-
+        // Snapshot the registry now. A service registering mid-run would change
+    // the group after the user had already signed it.
+    run.externalServices = registeredServices();
     // ---- 1. Harvest the three 402 challenges ----
     const { quotes } = await collectQuotes(body.request);
     run.quotes = quotes;
@@ -246,7 +256,9 @@ runsRouter.post(
     const run = getRun(params.runId);
     requirePhase(run, 'awaiting_signature');
 
-    const validation = validateSignedGroup(body.signedGroup, ATOMIC_GROUP_SIZE);
+        // The run's actual size, not a constant. A group carrying an externally
+    // registered service has more than five transactions in it.
+    const validation = validateSignedGroup(body.signedGroup, run.groupSize);
 
     if (!validation.valid) {
       throw new AppError(
@@ -259,16 +271,54 @@ runsRouter.post(
     run.signedGroup = body.signedGroup;
     transition(run, 'verifying');
 
-    // ---- fan out at the current tiers ----
-    const outcome = await verifyAll({
-      runId: run.id,
-      request: run.request,
-      tiers: run.tiers,
-      payTo: payeeMap(run),
-      signedGroup: body.signedGroup,
-    });
+       // The built-in three and any registered services verify in parallel
+    // against the same signed group. Each reads only its own slot.
+    const [outcome, externalOutcomes] = await Promise.all([
+      verifyAll({
+        runId: run.id,
+        request: run.request,
+        tiers: run.tiers,
+        payTo: payeeMap(run),
+        signedGroup: body.signedGroup,
+      }),
+      verifyExternalServices({
+        runId: run.id,
+        request: run.request,
+        tiers: run.tiers,
+        payTo: payeeMap(run),
+        signedGroup: body.signedGroup,
+        externalServices: run.externalServices,
+      }),
+    ]);
 
     run.verdicts = outcome.verdicts;
+
+    // An external refusal blocks settlement exactly like a built-in one. That
+    // is what makes registering a service a real act rather than a display.
+    const externalRefusals = externalOutcomes.filter((entry) => entry.error !== null);
+
+    if (externalRefusals.length > 0) {
+      const reason = externalRefusals
+        .map((entry) => entry.checkId + ': ' + (entry.error ?? 'refused'))
+        .join('; ');
+
+      abortRun(run, reason);
+
+      res.status(200).json(
+        ok({
+          runId: run.id,
+          round: run.ledger.rounds,
+          needsSignature: false as const,
+          readyToSettle: false as const,
+          nothingSettled: true as const,
+          failedChecks: externalRefusals.map((entry) => entry.checkId),
+          verdicts: outcome.verdicts,
+          reason,
+          ledger: run.ledger,
+        }),
+      );
+      return;
+    }
 
     // ---- all confirmed: ready to settle ----
     if (outcome.allConfirmed) {

@@ -36,6 +36,7 @@ import { X402_VERSION } from '@atomicagent/shared';
 import { TIER_SPECS } from '@atomicagent/shared';
 import type { CheckId } from '@atomicagent/shared';
 import type { Caip2Network } from '@atomicagent/shared';
+import type { DiscoveredService } from '@atomicagent/shared';
 import type { PaymentPayload } from '@atomicagent/shared';
 import type { SourcingRequest } from '@atomicagent/shared';
 import type { Tier } from '@atomicagent/shared';
@@ -63,6 +64,15 @@ export interface VerifyInput {
   payTo: Record<CheckId, string>;
   /** The signed group, base64, in slot order. Identical for all three calls. */
   signedGroup: string[];
+    /**
+   * Services registered at runtime from their own 402 challenges.
+   *
+   * Each is verified alongside the built-in three, using the slot it was
+   * assigned at registration. A refusal from any of them blocks settlement
+   * exactly like a built-in check, which is what makes the registration real
+   * rather than decorative.
+   */
+    externalServices?: DiscoveredService[];
 }
 
 /**
@@ -315,6 +325,7 @@ export async function verifyAll(
       ? 'all checks confirmed, settlement may proceed'
       : 'checks unresolved, settlement blocked',
   );
+  
 
   return {
     verdicts,
@@ -323,4 +334,153 @@ export async function verifyAll(
     unresolved,
     summary: allConfirmed ? null : reasons.join('; '),
   };
+}
+/**
+ * Verifies one externally registered service.
+ *
+ * Everything needed to build its payment header came out of that service's own
+ * 402 challenge: the amount, the payee, the asset, the network. Nothing here is
+ * specific to any provider, which is the claim the whole feature exists to make.
+ *
+ * The request body is an empty object. A generic caller cannot know what fields
+ * a particular service wants, and pretending otherwise would make the claim
+ * false. A service requiring specific input will say so, and that is a fair
+ * limitation to state plainly.
+ *
+ * @param service - the discovered service
+ * @param signedGroup - the signed group, identical for every call
+ * @param runId - for logging
+ * @returns the outcome, whether it succeeded or not
+ */
+async function verifyExternal(
+  service: DiscoveredService,
+  signedGroup: string[],
+  runId: string,
+): Promise<VerifyOutcome> {
+  const payload: PaymentPayload = {
+    x402Version: X402_VERSION,
+    accepted: {
+      scheme: service.chosen.scheme,
+      network: service.chosen.network as Caip2Network,
+      asset: service.chosen.asset,
+      amount: service.chosen.amount,
+      payTo: service.chosen.payTo,
+      maxTimeoutSeconds: service.chosen.maxTimeoutSeconds,
+      extra: service.chosen.extra ?? {},
+    },
+    payload: {
+      paymentGroup: signedGroup,
+      paymentIndex: service.paymentIndex,
+    },
+  };
+
+  const header = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 25_000);
+
+  try {
+    const response = await fetch(service.url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-PAYMENT': header,
+      },
+      body: '{}',
+      signal: controller.signal,
+    });
+
+    const text = await response.text();
+
+    // A 200 means the service accepted the payment and served its resource.
+    // Anything else is a refusal, and a refusal blocks the group.
+    if (response.status !== 200) {
+      let detail = text.slice(0, 200);
+
+      try {
+        const body = JSON.parse(text) as { message?: string; error?: string };
+        detail = body.message ?? body.error ?? detail;
+      } catch {
+        // Not JSON. Use the raw text, truncated.
+      }
+
+      logger.warn(
+        { runId, url: service.url, status: response.status, detail },
+        'external service refused',
+      );
+
+      return {
+        checkId: service.id as CheckId,
+        verdict: null,
+        error:
+          'returned HTTP ' + String(response.status) +
+          (detail ? ': ' + detail : ''),
+      };
+    }
+
+    logger.info(
+      { runId, url: service.url, slot: service.paymentIndex },
+      'external service verified its own slot',
+    );
+
+    return {
+      checkId: service.id as CheckId,
+      verdict: {
+        checkId: service.id as CheckId,
+        tier: 'standard',
+        confidence: 'confirmed',
+        certainty: 1,
+        passed: true,
+        reason:
+          'Externally registered service accepted payment at slot ' +
+          String(service.paymentIndex) + ' and served its resource.',
+        wouldResolve: null,
+        detailHash: '',
+      },
+      error: null,
+    };
+  } catch (cause) {
+    const aborted = cause instanceof Error && cause.name === 'AbortError';
+
+    const message = aborted
+      ? 'did not respond within 25 seconds'
+      : cause instanceof Error
+        ? cause.message
+        : 'unknown error';
+
+    logger.warn({ runId, url: service.url, error: message }, 'external service failed');
+
+    return {
+      checkId: service.id as CheckId,
+      verdict: null,
+      error: message,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Verifies every registered external service in parallel.
+ *
+ * @param input - the run, signed group and registered services
+ * @returns outcomes, one per service
+ */
+export async function verifyExternalServices(
+  input: VerifyInput,
+): Promise<VerifyOutcome[]> {
+  const services = input.externalServices ?? [];
+
+  if (services.length === 0) return [];
+
+  logger.info(
+    { runId: input.runId, count: services.length },
+    'verifying externally registered services',
+  );
+
+  return Promise.all(
+    services.map((service) =>
+      verifyExternal(service, input.signedGroup, input.runId),
+    ),
+  );
 }
