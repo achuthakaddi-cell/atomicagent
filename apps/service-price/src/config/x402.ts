@@ -74,6 +74,9 @@ export function buildTierRequirements(tier: Tier): PaymentRequirements {
     extra: {
       decimals: env.asset.decimals,
       name: env.asset.symbol,
+      // Required by the Global x402 Challenge for leaderboard attribution.
+      // The facilitator reads this to identify challenge participants.
+      tag: 'x402-global-challenge',
       // Non-standard, and deliberately so. The agent reads these to decide
       // which tier is worth paying for.
       tier: spec.tier,

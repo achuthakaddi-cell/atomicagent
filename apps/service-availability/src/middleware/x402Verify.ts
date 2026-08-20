@@ -108,6 +108,11 @@ function build402Body() {
       paymentIndex: OUR_PAYMENT_INDEX,
       checkId: 'availability' as const,
       tiered: true,
+      description:
+      'Verifies a supplier holds enough stock and can dispatch by your deadline. ' +
+      'Returns free units, earliest dispatch date and a certainty score. Three ' +
+      'tiers: last stock count, live quantity with reservations, or full audit ' +
+      'resolving pending allocations and confirming a dispatch slot.',
     },
   };
 }

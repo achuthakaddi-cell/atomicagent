@@ -107,6 +107,11 @@ function build402Body() {
       paymentIndex: OUR_PAYMENT_INDEX,
       checkId: 'verification' as const,
       tiered: true,
+      description:
+      'Verifies an Indian supplier is legally trading: GST registration status, ' +
+      'trade licence validity, and dispute history. Returns a verdict with a ' +
+      'certainty score. Three tiers: cached registry snapshot, live registry ' +
+      'lookup, or full audit including adverse filings.',
     },
   };
 }

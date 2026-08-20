@@ -121,6 +121,12 @@ function build402Body() {
       checkId: 'price' as const,
       tiered: true,
     },
+    // Shown in the Bazaar catalog. Names what the caller actually receives,
+    // not the topic — a vague description is what makes a listing useless.
+    description:
+      'Verifies a supplier unit price against your ceiling. Returns a pass/fail ' +
+      'verdict with a certainty score. Three tiers: cached snapshot, live source ' +
+      'lookup, or full audit with volume rebates applied.',
   };
 }
 
