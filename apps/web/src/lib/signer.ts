@@ -134,7 +134,32 @@ export function createWalletSigner(
 
     async sign(group, indexesToSign) {
       const bytes = group.map((encoded) => base64ToBytes(encoded));
-      const result = await signTransactions(bytes, indexesToSign);
+
+      let result: (Uint8Array | null)[];
+
+      try {
+        result = await signTransactions(bytes, indexesToSign);
+      } catch (cause) {
+        // Pera rejects with a variety of shapes depending on how the modal was
+        // dismissed — a click outside, the close button, or an explicit reject.
+        // None of them is a failure worth surfacing as one: the user simply
+        // chose not to sign, and the honest response is to say so and stop.
+        const message =
+          cause instanceof Error
+            ? cause.message
+            : typeof cause === 'string'
+              ? cause
+              : 'The signing request was dismissed';
+
+        const dismissed = /reject|cancel|denied|closed|dismiss|abort/i.test(message);
+
+        throw new Error(
+          dismissed
+            ? 'Signing cancelled. Nothing was sent, and you can try again.'
+            : message,
+        );
+      }
+
       return mergeSigned(group, result);
     },
   };
