@@ -136,4 +136,4 @@ availability. Switching to TestNet USDC (`10458941`) or MainNet USDC
 5. Note that slots 1, 2 and 3 differ in amount — that is the agent's spending
    decision, not a fixed price list
 6. Note slot 4, paying a fifth account 0.025 — a service registered by URL during
-   the session, which the orchestrator had no compile-time knowledge of
+   the session, which the orchestrator had no compile-time knowledge of`
