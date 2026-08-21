@@ -239,6 +239,26 @@ The demo offers three scenarios. Two of them abort:
 Running an aborting scenario is worth doing. The signed group is discarded and
 nothing reaches the chain.
 
+## Testing
+
+    pnpm test
+
+The suite covers the decisions leading up to a settlement: escalation rules at
+every threshold boundary, service-discovery compatibility, group-capacity
+arithmetic, and signed-group validation.
+
+It deliberately does not mock the facilitator or the chain. The evidence that
+those work is the settled group on the explorer, which is a stronger claim than
+any assertion could make. What these tests prove is that the reasoning leading
+up to that settlement is correct — that the agent escalates only when its own
+rules say it should, that a service on the wrong network is refused before a
+slot is built for it, and that a malformed group from the browser is caught
+before it reaches the facilitator.
+
+---
+
+## What we did not build
+
 ---
 
 ## What we did not build
