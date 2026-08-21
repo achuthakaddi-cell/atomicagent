@@ -135,6 +135,7 @@ export type {
 export {
   MAX_GROUP_SIZE,
   RESERVED_SLOTS,
+  FIRST_EXTERNAL_SLOT,
   MAX_EXTERNAL_SERVICES,
   serviceIdFromUrl,
   chooseOption,

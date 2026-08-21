@@ -94,14 +94,28 @@ export interface DiscoveryResult {
 export const MAX_GROUP_SIZE = 16;
 
 /**
- * Reserved slots: the fee payer, the three built-in checks, and the order
- * payment. Everything else is available to external services.
+ * Where external services start in the group.
+ *
+ * Slots 0 to 3 are the fee payer and the three built-in checks. External
+ * services occupy slot 4 onward, and the order payment is pushed to the end —
+ * so registering a service never renumbers anything that already exists.
+ *
+ * Counting the order payment here was a bug: it made the first external service
+ * land on the order's slot, and it was paid the order amount instead of its
+ * own fee.
  */
-export const RESERVED_SLOTS = 5;
+export const FIRST_EXTERNAL_SLOT = 4;
 
-/** How many external services can join before the group is full. */
-export const MAX_EXTERNAL_SERVICES = MAX_GROUP_SIZE - RESERVED_SLOTS;
+/** Kept for compatibility with existing callers. */
+export const RESERVED_SLOTS = FIRST_EXTERNAL_SLOT;
 
+/**
+ * How many external services can join.
+ *
+ * Sixteen slots total, four reserved at the front, one for the order payment
+ * at the end.
+ */
+export const MAX_EXTERNAL_SERVICES = MAX_GROUP_SIZE - FIRST_EXTERNAL_SLOT - 1;
 /**
  * Derives a stable id from a URL.
  *

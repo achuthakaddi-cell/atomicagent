@@ -11,6 +11,7 @@ import type { NextFunction, Request, Response } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { ERROR_CODE } from '@atomicagent/shared';
+import { servicesRouter } from './routes/services.js';
 import { env } from './config/env.js';
 import { logger } from './config/logger.js';
 import { loadFacilitatorCapabilities } from './config/facilitator.js';
@@ -100,6 +101,7 @@ app.get('/health', (_req, res) => {
 });
 
 app.use('/api/runs', runsRouter);
+app.use('/api/services', servicesRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

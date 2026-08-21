@@ -10,6 +10,7 @@
  */
 
 import { useWallet } from '@txnlab/use-wallet-react';
+import { ServiceRegistry } from './features/services/ServiceRegistry.js';
 import { AnimatePresence, motion } from 'motion/react';
 import { Hud } from './components/Hud.js';
 import { SourcingForm } from './features/sourcing/SourcingForm.js';
@@ -92,13 +93,21 @@ export default function App() {
                   <span
                     className={
                       'h-1.5 w-1.5 shrink-0 rounded-full transition-colors duration-300 ' +
-                      (active ? 'bg-brass' : done ? 'bg-verify' : 'bg-[var(--hairline)]')
+                      (active
+                        ? 'bg-brass'
+                        : done
+                          ? 'bg-verify'
+                          : 'bg-[var(--hairline)]')
                     }
                   />
                   <span
                     className={
                       'font-mono text-[11px] uppercase tracking-wider transition-colors duration-300 ' +
-                      (active ? 'text-brass' : done ? 'text-graphite' : 'text-[var(--graphite-dim)]')
+                      (active
+                        ? 'text-brass'
+                        : done
+                          ? 'text-graphite'
+                          : 'text-[var(--graphite-dim)]')
                     }
                   >
                     {entry.label}
@@ -132,7 +141,7 @@ export default function App() {
         </aside>
 
         {/* ---- centre ---- */}
-        <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center px-6 py-6">
+        <div className="relative flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-6">
           <AnimatePresence mode="wait">
             {store.phase === 'idle' && (
               <motion.div
@@ -141,8 +150,8 @@ export default function App() {
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -12 }}
                 transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-                className="flex flex-col items-center"
-              >
+                className="flex w-full flex-col items-center py-8"
+                >
                 <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.24em] text-graphite">
                   Algorand · x402 · adaptive spend
                 </p>
@@ -158,10 +167,20 @@ export default function App() {
 
                 <div className="mt-7">
                   {activeAddress ? (
-                    <SourcingForm
-                      onSubmit={(request) => void run.start(request)}
-                      disabled={busy}
-                    />
+                    <>
+                      <SourcingForm
+                        onSubmit={(request) => void run.start(request)}
+                        disabled={busy}
+                      />
+
+                      <div className="mt-4 w-full max-w-md">
+                        <ServiceRegistry
+                          assetSymbol={symbol}
+                          assetDecimals={decimals}
+                          disabled={busy}
+                        />
+                      </div>
+                    </>
                   ) : (
                     <p className="font-mono text-[11px] text-[var(--graphite-dim)]">
                       Connect a TestNet wallet to begin
@@ -189,7 +208,10 @@ export default function App() {
             {store.phase === 'aborted' && (
               <motion.div key="aborted" exit={{ opacity: 0 }}>
                 <Aborted
-                  reason={store.abortReason ?? 'One or more checks could not be confirmed'}
+                  reason={
+                    store.abortReason ??
+                    'One or more checks could not be confirmed'
+                  }
                   failedChecks={store.failedChecks}
                   verdicts={store.verdicts}
                   ledger={store.ledger}
@@ -221,8 +243,12 @@ export default function App() {
                 <PhaseHeading phase={store.phase} round={store.round} />
 
                 <div className="mt-3 w-full">
-                <TheBinding
-                    phase={store.phase === 'escalating' ? 'verifying' : store.phase}
+                  <TheBinding
+                    phase={
+                      store.phase === 'escalating'
+                        ? 'verifying'
+                        : store.phase
+                    }
                     groupId={null}
                     verdicts={store.verdicts}
                     failedChecks={store.failedChecks}
@@ -231,13 +257,19 @@ export default function App() {
 
                 <div className="mt-4 flex w-full gap-2.5">
                   {CHECK_IDS.map((checkId, index) => {
-                    const verdict = store.verdicts.find((v) => v.checkId === checkId);
+                    const verdict = store.verdicts.find(
+                      (v) => v.checkId === checkId
+                    );
 
                     return (
                       <CheckCard
                         key={checkId}
                         checkId={checkId}
-                        status={checkStatus(store.phase, checkId, store.verdicts)}
+                        status={checkStatus(
+                          store.phase,
+                          checkId,
+                          store.verdicts
+                        )}
                         reason={verdict?.reason ?? null}
                         wouldResolve={verdict?.wouldResolve ?? null}
                         tier={store.tiers[checkId]}
@@ -251,9 +283,32 @@ export default function App() {
 
                 {store.grandTotalAtomic !== '0' && (
                   <div className="mt-4 flex gap-7 font-mono text-[11px]">
-                    <Figure label="Checks" value={formatAmount(store.totalFeesAtomic, decimals, 3)} symbol={symbol} />
-                    <Figure label="Order" value={formatAmount(store.orderTotalAtomic, decimals)} symbol={symbol} />
-                    <Figure label="Total" value={formatAmount(store.grandTotalAtomic, decimals)} symbol={symbol} accent />
+                    <Figure
+                      label="Checks"
+                      value={formatAmount(
+                        store.totalFeesAtomic,
+                        decimals,
+                        3
+                      )}
+                      symbol={symbol}
+                    />
+                    <Figure
+                      label="Order"
+                      value={formatAmount(
+                        store.orderTotalAtomic,
+                        decimals
+                      )}
+                      symbol={symbol}
+                    />
+                    <Figure
+                      label="Total"
+                      value={formatAmount(
+                        store.grandTotalAtomic,
+                        decimals
+                      )}
+                      symbol={symbol}
+                      accent
+                    />
                   </div>
                 )}
               </motion.div>
@@ -288,7 +343,13 @@ export default function App() {
  * @param props - the current phase and round
  * @returns a heading describing what is happening now
  */
-function PhaseHeading({ phase, round }: { phase: string; round: number }) {
+function PhaseHeading({
+  phase,
+  round,
+}: {
+  phase: string;
+  round: number;
+}) {
   const text =
     phase === 'quoting'
       ? 'Collecting quotes'
@@ -358,8 +419,14 @@ function Figure({
       <p className="text-[9px] uppercase tracking-wider text-[var(--graphite-dim)]">
         {label}
       </p>
-      <p className={'tabular mt-0.5 text-[13px] ' + (accent ? 'text-brass' : 'text-chalk')}>
-        {value} <span className="text-[10px] text-graphite">{symbol}</span>
+      <p
+        className={
+          'tabular mt-0.5 text-[13px] ' +
+          (accent ? 'text-brass' : 'text-chalk')
+        }
+      >
+        {value}{' '}
+        <span className="text-[10px] text-graphite">{symbol}</span>
       </p>
     </div>
   );
