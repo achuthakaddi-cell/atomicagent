@@ -4,8 +4,8 @@
 and one supplier payment settle as a single indivisible Algorand transaction —
 or nothing settles at all.**
 
-🔗 **[Live app](https://atomicagent-web-five.vercel.app)** ·
-**[On-chain proof](https://lora.algokit.io/testnet/group/Aqy5GZcrjU%2B9ioBiiPZ0a239cRdQSxCJhC%2FJFJQsKxE%3D)** ·
+🔗 🔗 **[Live app](https://atomicagent-web-five.vercel.app)** ·
+**[On-chain proof](https://lora.algokit.io/testnet/group/CDQ%2BTwwkGDCw2%2BYrSvV5Pa2S7XQbRgDvY23alw81K38%3D)** ·
 **[Orchestrator health](https://atomicagentorchestrator-production.up.railway.app/health)**
 
 Built for the x402 Global Challenge by **G-SYNC** — Achutha A Kaddi, Madhumitha D.
@@ -132,9 +132,8 @@ per-request pricing makes possible and a prepaid model cannot express.
 
 A real run through the deployed application, on Algorand TestNet:
 
-**Group:** [`Aqy5GZcrjU+9ioBiiPZ0a239cRdQSxCJhC/JFJQsKxE=`](https://lora.algokit.io/testnet/group/Aqy5GZcrjU%2B9ioBiiPZ0a239cRdQSxCJhC%2FJFJQsKxE%3D)
-
-**Block:** 66490781 · **5 transactions, one block**
+**Group:** [`CDQ+TwwkGDCw2+YrSvV5Pa2S7XQbRgDvY23alw81K38=`](https://lora.algokit.io/testnet/group/CDQ%2BTwwkGDCw2%2BYrSvV5Pa2S7XQbRgDvY23alw81K38%3D)
+**Block:** 66527148 · **6 transactions, one block**
 
 | Slot | To | Amount |
 |------|-----|--------|
@@ -142,7 +141,8 @@ A real run through the deployed application, on Algorand TestNet:
 | 1 | price service | 0.05 aUSDC |
 | 2 | availability service | 0.05 aUSDC |
 | 3 | verification service | **0.20 aUSDC** |
-| 4 | supplier | 2,500 aUSDC |
+| 4 | **carbon service, registered by URL** | **0.025 aUSDC** |
+| 5 | supplier | 2,500 aUSDC |
 
 Two things are visible on the explorer that are worth reading closely.
 
