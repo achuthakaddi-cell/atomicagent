@@ -39,6 +39,16 @@ const envSchema = z.object({
   PAYMENT_ASSET_DECIMALS: z.coerce.number().int().min(0).max(19).default(6),
   PAYMENT_ASSET_SYMBOL: z.string().min(1).default('USDC'),
 
+  /**
+   * Live GST registry credentials.
+   *
+   * Optional by design. Without them the service degrades to structural
+   * validation and declares that it has done so, rather than pretending to a
+   * liveness it does not have.
+   */
+  GST_API_URL: z.string().url().optional(),
+  GST_API_KEY: z.string().optional(),
+
   FEE_VERIFICATION: z
     .string()
     .regex(/^\d+$/, 'FEE_VERIFICATION must be atomic units (digits only)'),
@@ -78,6 +88,16 @@ export const env = {
     decimals: raw.PAYMENT_ASSET_DECIMALS,
     symbol: raw.PAYMENT_ASSET_SYMBOL,
   },
+
+  /**
+   * Live registry endpoint and key.
+   *
+   * Null when unconfigured, which the lookup treats as a declared fallback
+   * rather than a silent one.
+   */
+  gstApiUrl: raw.GST_API_URL ?? null,
+  gstApiKey: raw.GST_API_KEY ?? null,
+
   feeAtomic: raw.FEE_VERIFICATION,
   corsOrigins: raw.CORS_ALLOWED_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean),
   rateLimit: {

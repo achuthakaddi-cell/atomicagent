@@ -70,7 +70,7 @@ checkRouter.post(
     const latency = TIER_SPECS[context.tier].latencyMs;
     await new Promise((resolve) => setTimeout(resolve, Math.min(latency, 2600)));
 
-    const result = runVerificationCheck({
+    const result = await runVerificationCheck({
       supplierId: body.supplierId,
       tier: context.tier,
     });
