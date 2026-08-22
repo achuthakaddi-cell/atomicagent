@@ -5,11 +5,16 @@
  * a pass or either failure path in one click rather than typing SKUs. Making
  * the failure case easy to demonstrate is deliberate: it is the more
  * interesting half of the pitch.
+ *
+ * The opt-in gate sits above the presets. A wallet that cannot receive the
+ * payment asset cannot settle, so the run button stays locked until it can.
  */
 
 import { useState } from 'react';
 import { motion } from 'motion/react';
 import type { SourcingRequest } from '../../lib/api.js';
+import { OptInGate } from '../../components/OptInGate';
+import { useAssetOptIn } from '../../hooks/useAssetOptIn';
 
 interface Preset {
   label: string;
@@ -65,14 +70,20 @@ interface SourcingFormProps {
 
 export function SourcingForm({ onSubmit, disabled }: SourcingFormProps) {
   const [selected, setSelected] = useState(0);
+  const { ready } = useAssetOptIn();
 
   const preset = PRESETS[selected] ?? PRESETS[0];
 
   if (!preset) return null;
 
+  // A run that cannot settle is worse than a run that never starts.
+  const runBlocked = disabled || !ready;
+
   return (
     <div className="w-full max-w-md">
-      <p className="mb-3 font-mono text-[10px] uppercase tracking-[0.24em] text-graphite">
+      <OptInGate />
+
+      <p className="mb-3 mt-4 font-mono text-[10px] uppercase tracking-[0.24em] text-graphite">
         Select a sourcing request
       </p>
 
@@ -108,7 +119,7 @@ export function SourcingForm({ onSubmit, disabled }: SourcingFormProps) {
                   {entry.label}
                 </span>
                 <span className="block font-mono text-[10px] text-[var(--graphite-dim)]">
-                  {entry.request.sku} · {entry.request.quantity} units · {entry.hint}
+                  {entry.request.sku} - {entry.request.quantity} units - {entry.hint}
                 </span>
               </span>
 
@@ -127,14 +138,14 @@ export function SourcingForm({ onSubmit, disabled }: SourcingFormProps) {
 
       <motion.button
         type="button"
-        disabled={disabled}
+        disabled={runBlocked}
         onClick={() => onSubmit(preset.request)}
-        whileHover={disabled ? undefined : { scale: 1.01 }}
-        whileTap={disabled ? undefined : { scale: 0.99 }}
+        whileHover={runBlocked ? undefined : { scale: 1.01 }}
+        whileTap={runBlocked ? undefined : { scale: 0.99 }}
         transition={{ type: 'spring', stiffness: 400, damping: 25 }}
         className={
           'mt-4 w-full rounded border border-[var(--brass-dim)] bg-brass/10 py-3 font-mono text-[11px] uppercase tracking-[0.18em] text-brass transition-colors duration-200 ' +
-          (disabled
+          (runBlocked
             ? 'cursor-not-allowed opacity-40'
             : 'hover:border-brass hover:bg-brass/20')
         }

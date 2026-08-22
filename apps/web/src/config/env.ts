@@ -9,6 +9,7 @@
 const orchestratorUrl = import.meta.env.VITE_ORCHESTRATOR_URL;
 const explorerBaseUrl = import.meta.env.VITE_EXPLORER_BASE_URL;
 const network = import.meta.env.VITE_ALGO_NETWORK;
+const paymentAssetId = import.meta.env.VITE_PAYMENT_ASSET_ID;
 
 if (!orchestratorUrl) {
   throw new Error(
@@ -20,6 +21,8 @@ export const env = {
   orchestratorUrl: String(orchestratorUrl),
   explorerBaseUrl: String(explorerBaseUrl ?? 'https://lora.algokit.io/testnet'),
   network: String(network ?? 'testnet'),
+  /** TestNet USDC. The asset every participant must be opted into. */
+  paymentAssetId: Number(paymentAssetId ?? 10458941),
 } as const;
 
 /**
