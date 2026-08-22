@@ -61,13 +61,13 @@ const CATALOGUE: readonly CatalogueEntry[] = [
     // Cached figure sits close to a typical ceiling and the snapshot is old,
     // so a shallow read cannot honestly confirm it. This is the case that
     // makes escalation worth demonstrating.
-    unitPriceAtomic: '4800000',
+    unitPriceAtomic: '8000',
     supplierId: 'SUP-BLR-011',
     cachedAt: '2026-08-14T20:00:00Z',
     cacheAgeHours: 11,
     // Live price has drifted down since the snapshot, so escalating confirms
     // the order rather than killing it.
-    livePriceAtomic: '4650000',
+    livePriceAtomic: '7750',
     volumeDiscountAtomic: null,
   },
   {
@@ -75,58 +75,57 @@ const CATALOGUE: readonly CatalogueEntry[] = [
     description: 'Galvanised steel coil, 0.8mm',
     // Cached figure sits just under a typical ceiling, and the cache is old.
     // A shallow check cannot honestly confirm this.
-    unitPriceAtomic: '4850000',
+    unitPriceAtomic: '8080',
     supplierId: 'SUP-BLR-011',
     cachedAt: '2026-08-14T22:00:00Z',
     cacheAgeHours: 14,
-    // Live price has moved above the ceiling since the snapshot.
-    livePriceAtomic: '5150000',
+    // Live price has moved above the ceiling since the snapshot. The cheap
+    // answer would have let this order through.
+    livePriceAtomic: '8580',
     volumeDiscountAtomic: null,
   },
   {
     sku: 'SKU-9002',
     description: 'Precision bearing assembly, grade 7',
-    unitPriceAtomic: '82000000',
+    // Far above any reasonable ceiling. Refuted at every tier, so escalating
+    // would be wasted spend — which the agent correctly declines to do.
+    unitPriceAtomic: '136000',
     supplierId: 'SUP-PUN-004',
     cachedAt: '2026-08-15T03:00:00Z',
     cacheAgeHours: 3,
-    livePriceAtomic: '82000000',
+    livePriceAtomic: '136000',
     volumeDiscountAtomic: null,
   },
   {
     sku: 'SKU-3310',
     description: 'Industrial fastener set, M8, zinc plated',
-    unitPriceAtomic: '150000',
+    unitPriceAtomic: '250',
     supplierId: 'SUP-BLR-011',
     cachedAt: '2026-08-15T05:00:00Z',
     cacheAgeHours: 1,
-    livePriceAtomic: '150000',
-    // A deep check surfaces a rebate worth finding on a large order.
-    volumeDiscountAtomic: '18000',
+    livePriceAtomic: '250',
+    // A deep check surfaces a rebate the cheaper tiers do not see.
+    volumeDiscountAtomic: '30',
   },
   {
     sku: 'SKU-4471',
     description: 'Cold-rolled steel sheet, 1.2mm, 1250x2500',
-    // Cached figure sits close to a typical ceiling and the snapshot is old,
-    // so a shallow read cannot honestly confirm it. This is the case that
-    // makes escalation worth demonstrating.
-    unitPriceAtomic: '4800000',
-    supplierId: 'SUP-BLR-011',
-    cachedAt: '2026-08-14T20:00:00Z',
-    cacheAgeHours: 11,
-    // Live price has drifted down since the snapshot, so escalating confirms
-    // the order rather than killing it.
-    livePriceAtomic: '4650000',
+    // A second supplier for the same SKU, cheaper. Seeds competitive sourcing.
+    unitPriceAtomic: '7200',
+    supplierId: 'SUP-CHN-330',
+    cachedAt: '2026-08-15T04:30:00Z',
+    cacheAgeHours: 2,
+    livePriceAtomic: '7200',
     volumeDiscountAtomic: null,
   },
   {
     sku: 'SKU-4471',
     description: 'Cold-rolled steel sheet, 1.2mm, 1250x2500',
-    unitPriceAtomic: '4680000',
+    unitPriceAtomic: '7800',
     supplierId: 'SUP-PUN-004',
     cachedAt: '2026-08-15T04:15:00Z',
     cacheAgeHours: 2,
-    livePriceAtomic: '4680000',
+    livePriceAtomic: '7800',
     volumeDiscountAtomic: null,
   },
 ];

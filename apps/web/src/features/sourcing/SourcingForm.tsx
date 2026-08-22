@@ -27,7 +27,7 @@ const PRESETS: Preset[] = [
     request: {
       sku: 'SKU-4471',
       quantity: 500,
-      maxUnitPriceAtomic: '5000000',
+      maxUnitPriceAtomic: '8333',
       requiredBy: '2026-09-15',
       supplierId: 'SUP-BLR-011',
     },
@@ -39,7 +39,7 @@ const PRESETS: Preset[] = [
     request: {
       sku: 'SKU-4472',
       quantity: 500,
-      maxUnitPriceAtomic: '5000000',
+      maxUnitPriceAtomic: '8333',
       requiredBy: '2026-09-15',
       supplierId: 'SUP-BLR-011',
     },
@@ -51,7 +51,7 @@ const PRESETS: Preset[] = [
     request: {
       sku: 'SKU-9002',
       quantity: 10,
-      maxUnitPriceAtomic: '5000000',
+      maxUnitPriceAtomic: '8333',
       requiredBy: '2026-09-15',
       supplierId: 'SUP-PUN-004',
     },
